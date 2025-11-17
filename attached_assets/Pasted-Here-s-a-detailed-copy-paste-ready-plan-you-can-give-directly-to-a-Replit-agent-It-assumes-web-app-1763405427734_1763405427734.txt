@@ -1,0 +1,337 @@
+Here’s a detailed, copy-paste-ready plan you can give directly to a Replit agent. It assumes web app first (React/Next.js or plain React + backend), one main page, and filters for: rumors, injuries, latest games, news across basketball, football, soccer.
+
+⸻
+
+Title
+
+Build a One-Page Sports Intel Dashboard with Filters (Basketball, Football, Soccer)
+
+⸻
+
+High-Level Goal
+
+Create a single-page web app that shows curated sports information for:
+	•	Sports: Basketball, Football, Soccer
+	•	Content types (filters):
+	•	Rumors
+	•	Injuries
+	•	Latest Games
+	•	News (confirmed / general)
+
+The goal: a clean, information-only dashboard—no memes, no jokes—where users can quickly filter and scan key updates.
+
+For now, you can use mock/static data or simple in-memory data structures instead of wiring to real external APIs. Just design everything so it can be replaced later with live data providers.
+
+⸻
+
+Tech Stack & Project Setup
+
+Front-end:
+	•	React (with Vite or Create React App) OR Next.js
+	•	Use a simple component structure.
+	•	Styling: Tailwind CSS or a lightweight CSS framework (or basic CSS modules if easier).
+
+Back-end (if needed for structure):
+	•	Lightweight Node.js + Express API
+	•	Or skip real backend and simulate with local JSON data / mock services, but design the structure as if an API exists.
+
+Key requirement:
+Everything is presented on one main page (single route); filters change the displayed data, not the URL.
+
+⸻
+
+Data Model (Conceptual Only—Can Be In-Memory for Now)
+
+Create clear data structures for Replit agent to implement. For now, these can be JS objects/arrays or TypeScript interfaces.
+
+1. Sport
+	•	id (string): "basketball" | "football" | "soccer"
+	•	name (string)
+
+2. Game
+
+Represents a single game (latest or recent).
+	•	id (string)
+	•	sportId (string)
+	•	league (string) – e.g., "NBA", "NFL", "EPL"
+	•	homeTeam (string)
+	•	awayTeam (string)
+	•	homeScore (number | null)
+	•	awayScore (number | null)
+	•	status (string) – "upcoming" | "live" | "finished"
+	•	startTime (ISO string)
+
+3. InfoItem (Unified Data Item for Rumors/Injuries/News)
+
+Use one generic type for all non-game information so filtering is easy.
+
+Fields:
+	•	id (string)
+	•	sportId (string) – "basketball" | "football" | "soccer"
+	•	type (string) – "rumor" | "injury" | "news"
+	•	title (string)
+	•	description (string)
+	•	player (string | null)
+	•	team (string | null)
+	•	source (string) – e.g., "ESPN", "The Athletic", "Beat Reporter"
+	•	sourceUrl (string | null)
+	•	timestamp (ISO string)
+	•	tag (string | null) – e.g., "trade", "contract", "out tonight"
+
+4. Data Grouping
+
+For the MVP:
+	•	A list/array of games (latest and recent) per sport.
+	•	A list/array of info items per sport (rumors, injuries, news).
+
+Replit agent should create a small realistic seed dataset with entries for each combination:
+	•	Rumor + Injury + News + Latest Game for each of:
+	•	Basketball
+	•	Football
+	•	Soccer
+
+⸻
+
+One-Page UI Layout
+
+The app must be one main dashboard page with the following structure.
+
+1. Top Bar / Header
+	•	App title, e.g., “Sports Intel Board”.
+	•	Optional small subtitle: “Pure stats and updates. No memes. Basketball • Football • Soccer”.
+
+2. Filter Bar (Critical)
+
+A horizontal filter bar at the top of the page, containing:
+	1.	Sport Filter (multi-select or single-select)
+Options:
+	•	Basketball
+	•	Football
+	•	Soccer
+Implementation details:
+	•	Use toggle buttons or pill-style buttons.
+	•	User can select one sport at a time for simplicity or allow multiple; design it so the code supports multiple but UI can be single-select if easier.
+	•	Default selection: All sports or Basketball.
+	2.	Info Type Filter (multi-select)
+Options:
+	•	Rumors
+	•	Injuries
+	•	Games
+	•	News
+Behavior:
+	•	Checkboxes or pill buttons.
+	•	At least one type is always selected.
+	•	Default: All types selected.
+	3.	Time Filter (simple)
+Options:
+	•	Last 24 hours
+	•	Last 3 days
+	•	Last 7 days
+For mock data, just compare timestamp against Date.now() and filter accordingly. If easier, you can ignore strict correctness and just demonstrate the filtering.
+	4.	Search Box (optional but useful)
+	•	Text input to search by player name or team name.
+	•	Filters the currently displayed items.
+
+3. Content Area
+
+Below the filter bar, show two main sections stacked vertically:
+
+A. “Latest Games” Section
+	•	Title: “Latest Games”
+	•	Show a list of Game Cards filtered by:
+	•	Selected sport(s)
+	•	Type filter includes “Games”
+	•	Time filter (game start time within range)
+
+Game Card layout:
+	•	Sport + League label (small text)
+	•	Teams: HOME vs AWAY
+	•	Score (if finished / live; show - if upcoming)
+	•	Status: LIVE, FINAL, or Starts at [time]
+	•	Time / date
+
+Use a compact layout so multiple games can be seen at once.
+
+B. “News & Updates” Section
+Below games:
+	•	Title: “News, Injuries & Rumors”
+	•	Show a vertical list of Info Cards, filtered by:
+	•	Selected sport(s)
+	•	Selected info types (type IN ['rumor', 'injury', 'news'] according to filter)
+	•	Time filter
+	•	Search keyword (matches player or team or title)
+
+Info Card layout:
+
+Each card should display:
+	•	A small badge for type:
+	•	Rumor (maybe yellow-ish badge)
+	•	Injury (red badge)
+	•	News (blue/neutral badge)
+	•	Sport badge: Basketball, Football, or Soccer
+	•	Title
+	•	Subtitle/detail line with:
+	•	Player (if any)
+	•	Team (if any)
+	•	Description (short) – truncated to a few lines
+	•	Source + timestamp (e.g., “ESPN · 2h ago”)
+	•	If sourceUrl exists, a “View Source” link
+
+Order: newest first by timestamp.
+
+⸻
+
+Filtering Logic (Behavior Description for Agent)
+
+The filtering pipeline for the Replit agent to implement:
+	1.	Start from all items (games + info items).
+	2.	Apply sport filter:
+	•	If specific sports selected, keep items where sportId is in selected list.
+	3.	Apply type filter:
+	•	For games: only show them if the “Games” filter is active.
+	•	For info items: only keep those where type is in selected types (rumor, injury, news).
+	4.	Apply time filter:
+	•	Convert timestamp or startTime to Date.
+	•	Compare against current time, keep only those within chosen range.
+	5.	Apply search filter:
+	•	If search text is non-empty:
+	•	Convert search text and fields to lowercase.
+	•	For games: match on team names.
+	•	For info items: match on title, player, team, description.
+
+The result is two filtered arrays:
+	•	filteredGames
+	•	filteredInfoItems
+
+Render those in their respective sections.
+
+⸻
+
+State Management Plan
+
+On the frontend, maintain a simple state object:
+	•	selectedSports: string[] – e.g., ["basketball", "football"]
+	•	selectedTypes: string[] – e.g., ["games", "injury", "news", "rumor"]
+	•	selectedTimeRange: "24h" | "3d" | "7d"
+	•	searchQuery: string
+
+Whenever the user changes any filter:
+	•	Update the respective state
+	•	Recompute filtered lists (this can be done with useMemo or a helper function)
+
+⸻
+
+Steps for the Replit Agent (Explicit Instructions)
+
+Step 1 – Initialize Project
+	1.	Create a new web project (React with Vite or CRA, or Next.js).
+	2.	Add a basic folder structure:
+	•	/src/components
+	•	/src/data
+	•	/src/hooks (optional)
+	3.	Add Tailwind CSS or basic styling setup.
+
+Step 2 – Seed Data
+	1.	In /src/data, create files like:
+	•	sports.ts or sports.js
+	•	games.ts
+	•	infoItems.ts
+	2.	Fill them with mock data that looks realistic:
+	•	For each sport (basketball, football, soccer), add:
+	•	3–5 recent or upcoming games.
+	•	6–10 info items (mix of rumors, injuries, news).
+	•	Use timestamps within last 24 hours, 3 days, 7 days so filters can be tested.
+
+Step 3 – Create Types/Interfaces (Optional but Preferred)
+
+If using TypeScript, define:
+	•	Sport
+	•	Game
+	•	InfoItem
+
+in a types.ts file and use them throughout.
+
+Step 4 – Build the Main Page Layout
+	1.	Create App.tsx or MainPage.tsx as the single page.
+	2.	Add:
+	•	Header component: Header
+	•	Filter bar component: Filters
+	•	Content area with:
+	•	GamesSection
+	•	InfoSection
+
+Each section should accept props that are pre-filtered arrays of items.
+
+Step 5 – Implement Filters Component
+
+Filters should:
+	•	Receive current state values and setters via props:
+	•	selectedSports
+	•	setSelectedSports
+	•	selectedTypes
+	•	setSelectedTypes
+	•	selectedTimeRange
+	•	setSelectedTimeRange
+	•	searchQuery
+	•	setSearchQuery
+
+And render:
+	•	Sport buttons or checkboxes (Basketball, Football, Soccer)
+	•	Type filters (Rumors, Injuries, Games, News)
+	•	Time range selector
+	•	Search input
+
+All interactions should update the state in the parent (App).
+
+Step 6 – Implement Filtering Logic
+
+In the main page component:
+	1.	Import raw data arrays (allGames, allInfoItems).
+	2.	Create a helper function or useMemo to compute filteredGames and filteredInfoItems based on:
+	•	selectedSports
+	•	selectedTypes
+	•	selectedTimeRange
+	•	searchQuery
+	3.	Pass filteredGames to GamesSection and filteredInfoItems to InfoSection.
+
+Step 7 – Build Game Cards and Info Cards
+
+GameCard:
+	•	Props: one Game.
+	•	Show:
+	•	Sport/league
+	•	Teams and scores
+	•	Status and start time.
+
+InfoCard:
+	•	Props: one InfoItem.
+	•	Show:
+	•	Badge for type (rumor/injury/news).
+	•	Sport label.
+	•	Title, player, team.
+	•	Short description, truncated.
+	•	Source and relative time (e.g., “2h ago”; for now a simple time string is fine).
+	•	“View Source” link if sourceUrl present.
+
+Step 8 – Styling
+	•	Use a dark or neutral theme, similar to a data dashboard.
+	•	Make the filter bar sticky at the top (optional).
+	•	Make cards compact, aligned, and scrollable.
+
+Step 9 – Extensibility Hooks
+
+Design the code so that later:
+	•	The static data arrays can be replaced by API responses.
+	•	The filtering logic doesn’t change; only the data provider changes.
+
+This means:
+	•	Keep a clear separation between data fetching layer and filtering/rendering.
+
+For now, just simulate data fetching by importing from /src/data.
+
+⸻
+
+If you want, after the Replit agent generates the initial version from this plan, we can iterate on:
+	•	Making the data provider asynchronous (simulate API).
+	•	Adding badges for “verified source” vs “speculative rumor”.
+	•	Eventually adding real API integrations.
