@@ -81,11 +81,20 @@ export default {
           busy: "rgb(239 68 68)",
           offline: "rgb(156 163 175)",
         },
+        // Custom sports colors
+        sport: {
+          rumor: "hsl(45 93% 47%)",
+          injury: "hsl(0 84% 60%)",
+          news: "hsl(217 91% 60%)",
+          live: "hsl(0 84% 60%)",
+          finished: "hsl(142 76% 36%)",
+          upcoming: "hsl(0 0% 50%)",
+        },
       },
       fontFamily: {
-        sans: ["var(--font-sans)"],
+        sans: ["Inter", "var(--font-sans)"],
         serif: ["var(--font-serif)"],
-        mono: ["var(--font-mono)"],
+        mono: ["JetBrains Mono", "var(--font-mono)"],
       },
       keyframes: {
         "accordion-down": {

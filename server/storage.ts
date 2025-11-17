@@ -1,37 +1,445 @@
-import { type User, type InsertUser } from "@shared/schema";
+import type { Game, InfoItem } from "@shared/schema";
 import { randomUUID } from "crypto";
 
-// modify the interface with any CRUD methods
-// you might need
-
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  getGames(): Promise<Game[]>;
+  getInfoItems(): Promise<InfoItem[]>;
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+  private games: Game[];
+  private infoItems: InfoItem[];
 
   constructor() {
-    this.users = new Map();
+    this.games = this.seedGames();
+    this.infoItems = this.seedInfoItems();
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async getGames(): Promise<Game[]> {
+    return this.games;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async getInfoItems(): Promise<InfoItem[]> {
+    return this.infoItems;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  private seedGames(): Game[] {
+    const now = new Date();
+    const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 60 * 60 * 1000).toISOString();
+    const hoursFromNow = (hours: number) => new Date(now.getTime() + hours * 60 * 60 * 1000).toISOString();
+
+    return [
+      // Basketball games
+      {
+        id: randomUUID(),
+        sportId: "basketball",
+        league: "NBA",
+        homeTeam: "Los Angeles Lakers",
+        awayTeam: "Golden State Warriors",
+        homeScore: 112,
+        awayScore: 118,
+        status: "finished",
+        startTime: hoursAgo(3),
+      },
+      {
+        id: randomUUID(),
+        sportId: "basketball",
+        league: "NBA",
+        homeTeam: "Boston Celtics",
+        awayTeam: "Miami Heat",
+        homeScore: 95,
+        awayScore: 92,
+        status: "live",
+        startTime: hoursAgo(1),
+      },
+      {
+        id: randomUUID(),
+        sportId: "basketball",
+        league: "NBA",
+        homeTeam: "Milwaukee Bucks",
+        awayTeam: "Philadelphia 76ers",
+        homeScore: null,
+        awayScore: null,
+        status: "upcoming",
+        startTime: hoursFromNow(4),
+      },
+      {
+        id: randomUUID(),
+        sportId: "basketball",
+        league: "NCAA",
+        homeTeam: "Duke Blue Devils",
+        awayTeam: "UNC Tar Heels",
+        homeScore: 78,
+        awayScore: 82,
+        status: "finished",
+        startTime: hoursAgo(48),
+      },
+
+      // Football games
+      {
+        id: randomUUID(),
+        sportId: "football",
+        league: "NFL",
+        homeTeam: "Kansas City Chiefs",
+        awayTeam: "Buffalo Bills",
+        homeScore: 28,
+        awayScore: 24,
+        status: "finished",
+        startTime: hoursAgo(24),
+      },
+      {
+        id: randomUUID(),
+        sportId: "football",
+        league: "NFL",
+        homeTeam: "San Francisco 49ers",
+        awayTeam: "Dallas Cowboys",
+        homeScore: 21,
+        awayScore: 17,
+        status: "live",
+        startTime: hoursAgo(2),
+      },
+      {
+        id: randomUUID(),
+        sportId: "football",
+        league: "NFL",
+        homeTeam: "Green Bay Packers",
+        awayTeam: "Chicago Bears",
+        homeScore: null,
+        awayScore: null,
+        status: "upcoming",
+        startTime: hoursFromNow(72),
+      },
+      {
+        id: randomUUID(),
+        sportId: "football",
+        league: "College Football",
+        homeTeam: "Alabama Crimson Tide",
+        awayTeam: "Georgia Bulldogs",
+        homeScore: 31,
+        awayScore: 27,
+        status: "finished",
+        startTime: hoursAgo(96),
+      },
+
+      // Soccer games
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        league: "EPL",
+        homeTeam: "Manchester City",
+        awayTeam: "Liverpool",
+        homeScore: 2,
+        awayScore: 2,
+        status: "finished",
+        startTime: hoursAgo(12),
+      },
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        league: "EPL",
+        homeTeam: "Arsenal",
+        awayTeam: "Chelsea",
+        homeScore: 1,
+        awayScore: 0,
+        status: "live",
+        startTime: hoursAgo(1.5),
+      },
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        league: "La Liga",
+        homeTeam: "Real Madrid",
+        awayTeam: "Barcelona",
+        homeScore: null,
+        awayScore: null,
+        status: "upcoming",
+        startTime: hoursFromNow(24),
+      },
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        league: "Champions League",
+        homeTeam: "Bayern Munich",
+        awayTeam: "Paris Saint-Germain",
+        homeScore: 3,
+        awayScore: 1,
+        status: "finished",
+        startTime: hoursAgo(72),
+      },
+    ];
+  }
+
+  private seedInfoItems(): InfoItem[] {
+    const now = new Date();
+    const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 60 * 60 * 1000).toISOString();
+
+    return [
+      // Basketball info items
+      {
+        id: randomUUID(),
+        sportId: "basketball",
+        type: "injury",
+        title: "LeBron James Listed as Questionable for Tonight's Game",
+        description: "Lakers star forward LeBron James is dealing with a minor ankle sprain sustained in practice yesterday. Team medical staff will evaluate him closer to game time.",
+        player: "LeBron James",
+        team: "Los Angeles Lakers",
+        source: "ESPN",
+        sourceUrl: "https://espn.com",
+        timestamp: hoursAgo(2),
+        tag: "questionable",
+      },
+      {
+        id: randomUUID(),
+        sportId: "basketball",
+        type: "rumor",
+        title: "Trade Talks Heat Up: Nets Shopping Star Guard",
+        description: "Multiple league sources report that Brooklyn Nets have made star guard available for trade discussions. Several contending teams have expressed interest, with negotiations expected to intensify before the deadline.",
+        player: "Kyrie Irving",
+        team: "Brooklyn Nets",
+        source: "The Athletic",
+        sourceUrl: "https://theathletic.com",
+        timestamp: hoursAgo(5),
+        tag: "trade",
+      },
+      {
+        id: randomUUID(),
+        sportId: "basketball",
+        type: "news",
+        title: "Giannis Antetokounmpo Named Eastern Conference Player of the Week",
+        description: "The Milwaukee Bucks forward earned the honor after averaging 32.5 points, 12.3 rebounds, and 5.8 assists over four games, leading his team to a perfect 4-0 record.",
+        player: "Giannis Antetokounmpo",
+        team: "Milwaukee Bucks",
+        source: "NBA.com",
+        sourceUrl: "https://nba.com",
+        timestamp: hoursAgo(18),
+        tag: "award",
+      },
+      {
+        id: randomUUID(),
+        sportId: "basketball",
+        type: "injury",
+        title: "Stephen Curry Expected to Miss 2-3 Weeks with Shoulder Injury",
+        description: "Warriors announce that their star point guard will be sidelined after MRI revealed a Grade 2 shoulder sprain. The team will re-evaluate in two weeks.",
+        player: "Stephen Curry",
+        team: "Golden State Warriors",
+        source: "ESPN",
+        sourceUrl: "https://espn.com",
+        timestamp: hoursAgo(36),
+        tag: "out 2-3 weeks",
+      },
+      {
+        id: randomUUID(),
+        sportId: "basketball",
+        type: "rumor",
+        title: "Celtics Eyeing Big Man Upgrade Before Playoffs",
+        description: "Boston front office reportedly exploring options to bolster their frontcourt depth, with several veteran centers on their radar as the trade deadline approaches.",
+        player: null,
+        team: "Boston Celtics",
+        source: "Yahoo Sports",
+        sourceUrl: "https://sports.yahoo.com",
+        timestamp: hoursAgo(48),
+        tag: "trade deadline",
+      },
+      {
+        id: randomUUID(),
+        sportId: "basketball",
+        type: "news",
+        title: "Rookie Sensation Records First Career Triple-Double",
+        description: "In just his 25th NBA game, the highly-touted rookie point guard posted 18 points, 10 rebounds, and 11 assists, becoming the youngest player this season to achieve the feat.",
+        player: "Scoot Henderson",
+        team: "Portland Trail Blazers",
+        source: "NBA.com",
+        sourceUrl: "https://nba.com",
+        timestamp: hoursAgo(8),
+        tag: "milestone",
+      },
+
+      // Football info items
+      {
+        id: randomUUID(),
+        sportId: "football",
+        type: "injury",
+        title: "Star Quarterback Doubtful for Playoff Game with Concussion",
+        description: "Team confirms QB entered concussion protocol after hit in last week's game. Backup preparing to start if he cannot clear protocol by Sunday.",
+        player: "Patrick Mahomes",
+        team: "Kansas City Chiefs",
+        source: "NFL Network",
+        sourceUrl: "https://nfl.com",
+        timestamp: hoursAgo(4),
+        tag: "doubtful",
+      },
+      {
+        id: randomUUID(),
+        sportId: "football",
+        type: "rumor",
+        title: "Reports: Multiple Teams Interested in Trading Up for Top QB Prospect",
+        description: "With the draft approaching, at least four teams have contacted franchises holding top-five picks to discuss potential trades, sources say. The quarterback class is driving unprecedented interest.",
+        player: null,
+        team: null,
+        source: "ESPN",
+        sourceUrl: "https://espn.com",
+        timestamp: hoursAgo(12),
+        tag: "draft",
+      },
+      {
+        id: randomUUID(),
+        sportId: "football",
+        type: "news",
+        title: "Defensive End Signs Record-Breaking Extension",
+        description: "All-Pro pass rusher agrees to six-year, $180 million extension, making him the highest-paid defensive player in league history. Deal includes $100M guaranteed.",
+        player: "Myles Garrett",
+        team: "Cleveland Browns",
+        source: "NFL.com",
+        sourceUrl: "https://nfl.com",
+        timestamp: hoursAgo(24),
+        tag: "contract",
+      },
+      {
+        id: randomUUID(),
+        sportId: "football",
+        type: "injury",
+        title: "Wide Receiver Undergoes Successful ACL Surgery, Out for Season",
+        description: "Team's leading receiver will miss remainder of season after tearing ACL in Sunday's game. Expected to make full recovery in time for next year's training camp.",
+        player: "Justin Jefferson",
+        team: "Minnesota Vikings",
+        source: "ESPN",
+        sourceUrl: "https://espn.com",
+        timestamp: hoursAgo(60),
+        tag: "out for season",
+      },
+      {
+        id: randomUUID(),
+        sportId: "football",
+        type: "rumor",
+        title: "Coaching Staff Shakeup Expected After Season",
+        description: "League insiders suggest major changes coming to coaching staff regardless of playoff results. Offensive coordinator position appears most vulnerable.",
+        player: null,
+        team: "Dallas Cowboys",
+        source: "The Athletic",
+        sourceUrl: "https://theathletic.com",
+        timestamp: hoursAgo(30),
+        tag: "coaching",
+      },
+      {
+        id: randomUUID(),
+        sportId: "football",
+        type: "news",
+        title: "Running Back Reaches 1,000-Yard Milestone",
+        description: "Star running back eclipsed the 1,000 rushing yards mark for the fifth consecutive season, joining elite company in franchise history.",
+        player: "Derrick Henry",
+        team: "Tennessee Titans",
+        source: "NFL.com",
+        sourceUrl: "https://nfl.com",
+        timestamp: hoursAgo(15),
+        tag: "milestone",
+      },
+
+      // Soccer info items
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        type: "injury",
+        title: "Star Striker Sidelined with Hamstring Injury",
+        description: "Club confirms their top scorer will miss the next three matches after pulling his hamstring in training. Medical team optimistic about recovery timeline.",
+        player: "Erling Haaland",
+        team: "Manchester City",
+        source: "BBC Sport",
+        sourceUrl: "https://bbc.com/sport",
+        timestamp: hoursAgo(6),
+        tag: "out 3 matches",
+      },
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        type: "rumor",
+        title: "European Giants Preparing Record Bid for Young Midfielder",
+        description: "Multiple reports suggest that top European clubs are ready to submit offers exceeding €100 million for the 21-year-old sensation. Player's current club insists he is not for sale.",
+        player: "Jude Bellingham",
+        team: "Real Madrid",
+        source: "Sky Sports",
+        sourceUrl: "https://skysports.com",
+        timestamp: hoursAgo(10),
+        tag: "transfer",
+      },
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        type: "news",
+        title: "Manager Signs Contract Extension Through 2027",
+        description: "Club announces that their successful manager has agreed to a three-year extension, ending speculation about his future. The move brings stability amid strong season performance.",
+        player: "Pep Guardiola",
+        team: "Manchester City",
+        source: "The Guardian",
+        sourceUrl: "https://theguardian.com",
+        timestamp: hoursAgo(20),
+        tag: "contract",
+      },
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        type: "injury",
+        title: "Goalkeeper Faces Extended Absence After Hand Surgery",
+        description: "First-choice keeper underwent surgery to repair fractured finger sustained in last match. Club expects him to be out for 6-8 weeks, backup will take over starting role.",
+        player: "Alisson Becker",
+        team: "Liverpool",
+        source: "ESPN",
+        sourceUrl: "https://espn.com",
+        timestamp: hoursAgo(72),
+        tag: "out 6-8 weeks",
+      },
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        type: "rumor",
+        title: "Italian Club Monitoring Defender for Summer Move",
+        description: "Serie A giants have been closely watching the young defender's performances this season. Sources indicate preliminary discussions about a potential summer transfer.",
+        player: "William Saliba",
+        team: "Arsenal",
+        source: "Goal.com",
+        sourceUrl: "https://goal.com",
+        timestamp: hoursAgo(40),
+        tag: "transfer",
+      },
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        type: "news",
+        title: "Forward Scores Hat-Trick in Dominant Victory",
+        description: "The prolific striker netted three goals in a commanding performance, bringing his season tally to 28 goals across all competitions. Performance drew praise from pundits across Europe.",
+        player: "Kylian Mbappé",
+        team: "Paris Saint-Germain",
+        source: "L'Équipe",
+        sourceUrl: "https://lequipe.fr",
+        timestamp: hoursAgo(14),
+        tag: "performance",
+      },
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        type: "news",
+        title: "Club Announces New Stadium Expansion Plans",
+        description: "Board reveals ambitious plans to increase stadium capacity by 15,000 seats. Construction expected to begin next summer with completion targeted for 2026 season.",
+        player: null,
+        team: "Tottenham Hotspur",
+        source: "BBC Sport",
+        sourceUrl: "https://bbc.com/sport",
+        timestamp: hoursAgo(96),
+        tag: "stadium",
+      },
+      {
+        id: randomUUID(),
+        sportId: "soccer",
+        type: "rumor",
+        title: "Winger Linked with Move to La Liga Giants",
+        description: "Spanish media reports that Barcelona are preparing an offer for the talented winger. Player's representatives have reportedly met with club officials to discuss terms.",
+        player: "Bukayo Saka",
+        team: "Arsenal",
+        source: "Marca",
+        sourceUrl: "https://marca.com",
+        timestamp: hoursAgo(28),
+        tag: "transfer",
+      },
+    ];
   }
 }
 
