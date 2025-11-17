@@ -166,16 +166,15 @@ export function FilterBar({
               )}
             </div>
 
-            {hasActiveFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearFilters}
-                data-testid="button-clear-filters"
-              >
-                Clear all
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearFilters}
+              disabled={!hasActiveFilters}
+              data-testid="button-clear-filters"
+            >
+              Clear all
+            </Button>
 
             <Badge variant="secondary" className="ml-auto" data-testid="results-count">
               {totalResults} results
