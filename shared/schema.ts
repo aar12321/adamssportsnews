@@ -47,6 +47,45 @@ export const infoItemSchema = z.object({
 
 export type InfoItem = z.infer<typeof infoItemSchema>;
 
+// News Article schema
+export const newsArticleSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  content: z.string().optional(),
+  url: z.string(),
+  imageUrl: z.string().optional(),
+  source: z.string(),
+  author: z.string().optional(),
+  publishedAt: z.string(),
+  sportId: sportIdSchema,
+  category: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+export type NewsArticle = z.infer<typeof newsArticleSchema>;
+
+// Score schema
+export const scoreStatusSchema = z.enum(["scheduled", "live", "finished"]);
+export type ScoreStatus = z.infer<typeof scoreStatusSchema>;
+
+export const scoreSchema = z.object({
+  id: z.string(),
+  sportId: sportIdSchema,
+  league: z.string(),
+  homeTeam: z.string(),
+  awayTeam: z.string(),
+  homeScore: z.number().nullable(),
+  awayScore: z.number().nullable(),
+  status: scoreStatusSchema,
+  startTime: z.string(),
+  period: z.string().optional(),
+  venue: z.string().optional(),
+  source: z.string(),
+});
+
+export type Score = z.infer<typeof scoreSchema>;
+
 // Filter types
 export type TimeRange = "24h" | "3d" | "7d";
 
