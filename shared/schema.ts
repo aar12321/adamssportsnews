@@ -109,6 +109,10 @@ export interface BetAnalysis {
   homeRecord: string;
   awayRecord: string;
   analysis: string;
+  /** ESPN or score service event id when analysis is tied to a real game */
+  eventId?: string;
+  /** Whether moneyline/spread/total came from a sportsbook API or the internal model */
+  oddsSource?: "sportsbook" | "model";
 }
 
 export interface MockBet {

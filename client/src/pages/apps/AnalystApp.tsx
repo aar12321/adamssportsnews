@@ -1,18 +1,14 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { APP_SPORTS } from "@shared/appSports";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   BarChart3, ChevronLeft, Search, TrendingUp, Users, ArrowLeftRight,
   Trophy, Activity, Target, Star, Flame, ChevronRight, Award
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
-import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, Cell } from "recharts";
-
-const SPORTS = [
-  { key: "basketball", label: "NBA" },
-  { key: "football", label: "NFL" },
-  { key: "soccer", label: "Soccer" },
-];
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from "recharts";
 
 function FormBadges({ form }: { form: string[] }) {
   return (
@@ -32,6 +28,9 @@ function FormBadges({ form }: { form: string[] }) {
 }
 
 function TeamCard({ team, onClick, isSelected }: { team: any; onClick: () => void; isSelected: boolean }) {
+  const isSoccer = team.sport === "soccer";
+  const forLabel = isSoccer ? "GF" : "PPG";
+  const againstLabel = isSoccer ? "GA" : "OPP";
   return (
     <button
       onClick={onClick}
@@ -58,11 +57,11 @@ function TeamCard({ team, onClick, isSelected }: { team: any; onClick: () => voi
       <div className="grid grid-cols-3 gap-2 mb-3">
         <div className="text-center">
           <p className="text-base font-bold text-foreground num">{team.pointsPerGame?.toFixed(1)}</p>
-          <p className="text-xs text-muted-foreground">PPG</p>
+          <p className="text-xs text-muted-foreground">{forLabel}</p>
         </div>
         <div className="text-center">
           <p className="text-base font-bold text-foreground num">{team.pointsAllowed?.toFixed(1)}</p>
-          <p className="text-xs text-muted-foreground">OPP</p>
+          <p className="text-xs text-muted-foreground">{againstLabel}</p>
         </div>
         <div className="text-center">
           <p className={cn("text-base font-bold num", team.differential >= 0 ? "text-green-400" : "text-red-400")}>
@@ -187,7 +186,7 @@ function ComparisonView({ sport }: { sport: string }) {
       const res = await fetch("/api/analyst/teams/compare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ team1: selectedTeam1, team2: selectedTeam2 }),
+        body: JSON.stringify({ team1: selectedTeam1, team2: selectedTeam2, sport }),
       });
       return res.json();
     },
@@ -214,8 +213,8 @@ function ComparisonView({ sport }: { sport: string }) {
             className="input-field"
           />
           {team1Query && !selectedTeam1 && (
-            <div className="space-y-1 max-h-32 overflow-y-auto">
-              {filteredTeams1.slice(0, 4).map((t: any) => (
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {filteredTeams1.slice(0, 16).map((t: any) => (
                 <button key={t.id}
                   onClick={() => { setSelectedTeam1(t.name); setTeam1Query(t.name); }}
                   className="w-full text-left px-3 py-2 bg-muted/50 hover:bg-muted rounded-xl text-xs text-foreground transition-all">
@@ -235,8 +234,8 @@ function ComparisonView({ sport }: { sport: string }) {
             className="input-field"
           />
           {team2Query && !selectedTeam2 && (
-            <div className="space-y-1 max-h-32 overflow-y-auto">
-              {filteredTeams2.slice(0, 4).map((t: any) => (
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {filteredTeams2.slice(0, 16).map((t: any) => (
                 <button key={t.id}
                   onClick={() => { setSelectedTeam2(t.name); setTeam2Query(t.name); }}
                   className="w-full text-left px-3 py-2 bg-muted/50 hover:bg-muted rounded-xl text-xs text-foreground transition-all">
@@ -346,25 +345,35 @@ export default function AnalystApp() {
   const [activeTab, setActiveTab] = useState<"teams" | "compare" | "players" | "leaders">("teams");
   const [selectedTeam, setSelectedTeam] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
 
-  const { data: teams, isLoading: loadingTeams } = useQuery({
+  const {
+    data: teams,
+    isLoading: loadingTeams,
+    isError: teamsError,
+    refetch: refetchTeams,
+  } = useQuery({
     queryKey: ["/api/analyst/teams", selectedSport],
     queryFn: async () => {
       const res = await fetch(`/api/analyst/teams?sport=${selectedSport}`);
-      return res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load teams");
+      return data;
     },
+    staleTime: 120_000,
   });
 
   const { data: players, isLoading: loadingPlayers } = useQuery({
-    queryKey: ["/api/analyst/players/search", searchQuery, selectedSport],
+    queryKey: ["/api/analyst/players/search", debouncedSearch, selectedSport],
     queryFn: async () => {
-      const url = searchQuery
-        ? `/api/analyst/players/search?q=${encodeURIComponent(searchQuery)}&sport=${selectedSport}`
-        : `/api/analyst/players/search?q=&sport=${selectedSport}`;
+      const url = `/api/analyst/players/search?q=${encodeURIComponent(debouncedSearch)}&sport=${selectedSport}`;
       const res = await fetch(url);
-      return res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Search failed");
+      return data;
     },
-    enabled: activeTab === "players",
+    enabled: activeTab === "players" && debouncedSearch.trim().length > 0,
+    staleTime: 60_000,
   });
 
   const { data: trending } = useQuery({
@@ -373,6 +382,7 @@ export default function AnalystApp() {
       const res = await fetch(`/api/analyst/teams/trending?sport=${selectedSport}`);
       return res.json();
     },
+    staleTime: 120_000,
   });
 
   const filteredTeams = teams?.filter((t: any) =>
@@ -389,17 +399,19 @@ export default function AnalystApp() {
           </a>
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-foreground">The Analyst</h1>
-          <p className="text-sm text-muted-foreground">Ultimate sports research platform</p>
+          <h1 className="text-2xl font-bold tracking-tight">
+            <span className="gradient-text">The Analyst</span>
+          </h1>
+          <p className="text-sm text-muted-foreground">ESPN team universe · leader search · side‑by‑side compare</p>
         </div>
       </div>
 
       {/* Sport selector */}
       <div className="tab-bar mb-5">
-        {SPORTS.map(sport => (
-          <button key={sport.key} className={cn("tab-item", selectedSport === sport.key && "active")}
-            onClick={() => { setSelectedSport(sport.key); setSelectedTeam(null); setSearchQuery(""); }}>
-            {sport.label}
+        {APP_SPORTS.map((s) => (
+          <button key={s.id} className={cn("tab-item", selectedSport === s.id && "active")}
+            onClick={() => { setSelectedSport(s.id); setSelectedTeam(null); setSearchQuery(""); }}>
+            {s.label}
           </button>
         ))}
       </div>
@@ -436,11 +448,20 @@ export default function AnalystApp() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="text"
-                placeholder={activeTab === "teams" ? "Search teams..." : "Search players..."}
+                placeholder={activeTab === "teams" ? "Filter teams…" : "Try: Jokic, Chiefs, Haaland…"}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="input-field pl-10"
               />
+            </div>
+          )}
+
+          {activeTab === "teams" && teamsError && (
+            <div className="flex items-center justify-between gap-2 p-3 rounded-xl bg-destructive/10 border border-destructive/25 text-xs text-destructive">
+              <span>Teams didn&apos;t load.</span>
+              <button type="button" className="font-semibold underline" onClick={() => refetchTeams()}>
+                Retry
+              </button>
             </div>
           )}
 
@@ -519,10 +540,16 @@ export default function AnalystApp() {
                   </div>
                 </button>
               ))}
-              {(!players || players.length === 0) && !loadingPlayers && (
-                <div className="glass-card p-6 text-center">
+              {(!players || players.length === 0) && !loadingPlayers && debouncedSearch.trim().length > 0 && (
+                <div className="glass-card p-6 text-center space-y-1">
                   <Users className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">Search for players</p>
+                  <p className="text-sm text-muted-foreground">No players match &ldquo;{debouncedSearch}&rdquo;</p>
+                  <p className="text-xs text-muted-foreground/80">Try another spelling or switch league above.</p>
+                </div>
+              )}
+              {activeTab === "players" && debouncedSearch.trim().length === 0 && (
+                <div className="glass-card p-6 text-center border-dashed border border-border/80">
+                  <p className="text-sm text-muted-foreground">Type at least one character to search ESPN leader data + our cache.</p>
                 </div>
               )}
             </div>
@@ -559,8 +586,8 @@ export default function AnalystApp() {
                 {[
                   { label: "Teams Tracked", value: teams?.length || 0, icon: Trophy, color: "text-primary" },
                   { label: "Hot Streaks", value: trending?.length || 0, icon: Flame, color: "text-orange-400" },
-                  { label: "Active Players", value: "100+", icon: Users, color: "text-green-400" },
-                  { label: "Stats Categories", value: "20+", icon: BarChart3, color: "text-purple-400" },
+                  { label: "Leaderboard rows", value: "ESPN + cache", icon: Users, color: "text-green-400" },
+                  { label: "Stats Categories", value: "Multi", icon: BarChart3, color: "text-purple-400" },
                 ].map(({ label, value, icon: Icon, color }) => (
                   <div key={label} className="glass-card p-4 text-center">
                     <Icon className={cn("w-5 h-5 mx-auto mb-1.5", color)} />
@@ -573,12 +600,14 @@ export default function AnalystApp() {
               {/* Teams overview bar chart */}
               {teams && teams.length > 0 && (
                 <div className="glass-card p-5">
-                  <h3 className="font-bold text-foreground mb-4">Points Per Game Comparison</h3>
+                  <h3 className="font-bold text-foreground mb-4">
+                    {selectedSport === "soccer" ? "Goals vs. conceded (top clubs)" : "Offense vs. defense snapshot"}
+                  </h3>
                   <ResponsiveContainer width="100%" height={240}>
                     <BarChart data={teams.slice(0, 6).map((t: any) => ({
                       name: t.abbreviation || t.name.split(" ").slice(-1)[0],
-                      PPG: t.pointsPerGame,
-                      OPP: t.pointsAllowed,
+                      For: t.pointsPerGame,
+                      Against: t.pointsAllowed,
                     }))}>
                       <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#888" }} />
                       <YAxis tick={{ fontSize: 10, fill: "#888" }} domain={['auto', 'auto']} />
@@ -587,8 +616,8 @@ export default function AnalystApp() {
                         labelStyle={{ color: "#fff", fontWeight: "bold" }}
                       />
                       <Legend />
-                      <Bar dataKey="PPG" fill="hsl(221 83% 62%)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="OPP" fill="hsl(0 72% 51% / 0.6)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="For" fill="hsl(221 83% 62%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Against" fill="hsl(0 72% 51% / 0.6)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

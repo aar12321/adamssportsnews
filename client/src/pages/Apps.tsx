@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "wouter";
-import { DollarSign, Trophy, BarChart3, ArrowRight, Zap, TrendingUp, Users, ChevronRight } from "lucide-react";
+import { DollarSign, Trophy, BarChart3, ArrowRight, Zap, TrendingUp, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const apps = [
@@ -30,7 +30,7 @@ const apps = [
     badge: "Live",
     badgeColor: "bg-green-500/15 text-green-400",
     features: ["Player projections", "Trade analyzer", "Injury alerts", "Waiver wire"],
-    stat: { label: "Players Tracked", value: "18+" },
+    stat: { label: "Data sources", value: "ESPN + mock" },
   },
   {
     href: "/apps/analyst",
@@ -44,19 +44,23 @@ const apps = [
     badge: "New",
     badgeColor: "bg-blue-500/15 text-blue-400",
     features: ["Team analysis", "Player stats", "H2H compare", "League leaders"],
-    stat: { label: "Sports Covered", value: "5" },
+    stat: { label: "Leagues", value: "NBA · NFL · EPL" },
   },
 ];
 
 export default function Apps() {
   return (
     <div className="animate-fade-in">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Apps</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Premium sports tools — your edge on the competition
-        </p>
+      <div className="relative mb-10 rounded-3xl border border-border/60 apps-hero-gradient px-6 py-8 md:px-10 md:py-10 overflow-hidden">
+        <div className="relative z-[1] max-w-2xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary/90 mb-2">Sportsaurzo Pro</p>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground mb-2">
+            One hub. <span className="gradient-text">Three engines.</span>
+          </h1>
+          <p className="text-sm md:text-base text-muted-foreground leading-relaxed">
+            Live schedules from ESPN, leaderboards, and optional sportsbook lines — built for clarity, speed, and confidence.
+          </p>
+        </div>
       </div>
 
       {/* App cards */}
@@ -110,8 +114,8 @@ export default function Apps() {
       {/* Quick stats */}
       <div className="mt-8 grid grid-cols-3 gap-4">
         {[
-          { label: "Live Sports", value: "5+", icon: Zap, color: "text-green-400" },
-          { label: "Real-time Data", value: "24/7", icon: TrendingUp, color: "text-primary" },
+          { label: "Core leagues", value: "NBA · NFL · EPL", icon: Zap, color: "text-green-400" },
+          { label: "Schedules & leaders", value: "ESPN", icon: TrendingUp, color: "text-primary" },
           { label: "Premium Tools", value: "3 Apps", icon: Users, color: "text-purple-400" },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="glass-card p-4 text-center">

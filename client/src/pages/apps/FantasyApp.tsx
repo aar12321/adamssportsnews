@@ -1,4 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import { APP_SPORTS } from "@shared/appSports";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Trophy, ChevronLeft, Search, AlertCircle, TrendingUp, TrendingDown,
@@ -6,12 +8,6 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
-
-const SPORTS = [
-  { key: "basketball", label: "NBA" },
-  { key: "football", label: "NFL" },
-  { key: "soccer", label: "Soccer" },
-];
 
 const STATUS_CONFIG = {
   active: { label: "Active", className: "text-green-400 bg-green-500/10" },
@@ -125,15 +121,15 @@ function PlayerCard({ player, compact = false }: { player: any; compact?: boolea
   );
 }
 
-function TradeAnalyzer() {
+function TradeAnalyzer({ sportKey }: { sportKey: string }) {
   const [givingIds, setGivingIds] = useState<string[]>([]);
   const [receivingIds, setReceivingIds] = useState<string[]>([]);
   const [step, setStep] = useState<"giving" | "receiving" | "result">("giving");
 
   const { data: players } = useQuery({
-    queryKey: ["/api/fantasy/players"],
+    queryKey: ["/api/fantasy/players", sportKey],
     queryFn: async () => {
-      const res = await fetch("/api/fantasy/players");
+      const res = await fetch(`/api/fantasy/players?sport=${encodeURIComponent(sportKey)}`);
       return res.json();
     },
   });
@@ -159,6 +155,12 @@ function TradeAnalyzer() {
     }
   };
 
+  useEffect(() => {
+    setGivingIds([]);
+    setReceivingIds([]);
+    setStep("giving");
+  }, [sportKey]);
+
   return (
     <div className="glass-card p-5 space-y-4">
       <h3 className="font-bold text-foreground flex items-center gap-2">
@@ -178,7 +180,7 @@ function TradeAnalyzer() {
           </div>
 
           <div className="space-y-2 max-h-64 overflow-y-auto">
-            {(players || []).slice(0, 12).map((p: any) => {
+            {(players || []).slice(0, 24).map((p: any) => {
               const currentIds = step === "giving" ? givingIds : receivingIds;
               const isSelected = currentIds.includes(p.id);
               return (
@@ -255,6 +257,7 @@ export default function FantasyApp() {
   const [selectedSport, setSelectedSport] = useState("basketball");
   const [activeTab, setActiveTab] = useState<"roster" | "players" | "waiver" | "injuries" | "trade">("roster");
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
 
   const { data: team } = useQuery({
     queryKey: ["/api/fantasy/team/sample", selectedSport],
@@ -270,6 +273,7 @@ export default function FantasyApp() {
       const res = await fetch(`/api/fantasy/players/top?sport=${selectedSport}&limit=20`);
       return res.json();
     },
+    staleTime: 120_000,
   });
 
   const { data: waiverTargets } = useQuery({
@@ -289,16 +293,29 @@ export default function FantasyApp() {
   });
 
   const { data: searchResults } = useQuery({
-    queryKey: ["/api/fantasy/players/search", searchQuery, selectedSport],
+    queryKey: ["/api/fantasy/players/search", debouncedSearch, selectedSport],
     queryFn: async () => {
-      if (!searchQuery.trim()) return [];
-      const res = await fetch(`/api/fantasy/players/search?q=${encodeURIComponent(searchQuery)}&sport=${selectedSport}`);
+      if (!debouncedSearch.trim()) return [];
+      const res = await fetch(`/api/fantasy/players/search?q=${encodeURIComponent(debouncedSearch)}&sport=${selectedSport}`);
       return res.json();
     },
-    enabled: searchQuery.trim().length > 1,
+    enabled: debouncedSearch.trim().length > 1,
+    staleTime: 60_000,
   });
 
-  const displayPlayers = searchQuery.trim().length > 1 ? (searchResults || []) : (topPlayers || []);
+  const displayPlayers = debouncedSearch.trim().length > 1 ? (searchResults || []) : (topPlayers || []);
+
+  const rosterFiltered = useMemo(() => {
+    const r = team?.roster || [];
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return r;
+    return r.filter(
+      (p: { name: string; team?: string; position?: string }) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.team && p.team.toLowerCase().includes(q)) ||
+        (p.position && p.position.toLowerCase().includes(q))
+    );
+  }, [team?.roster, searchQuery]);
 
   return (
     <div className="animate-fade-in max-w-5xl">
@@ -310,17 +327,19 @@ export default function FantasyApp() {
           </a>
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Fantasy Teams</h1>
-          <p className="text-sm text-muted-foreground">Player research & team management</p>
+          <h1 className="text-2xl font-bold tracking-tight">
+            <span className="gradient-text">Fantasy Teams</span>
+          </h1>
+          <p className="text-sm text-muted-foreground">ESPN-powered boards · trades · injuries · waiver targets</p>
         </div>
       </div>
 
       {/* Sport selector */}
       <div className="tab-bar mb-5">
-        {SPORTS.map(sport => (
-          <button key={sport.key} className={cn("tab-item", selectedSport === sport.key && "active")}
-            onClick={() => setSelectedSport(sport.key)}>
-            {sport.label}
+        {APP_SPORTS.map((s) => (
+          <button key={s.id} className={cn("tab-item", selectedSport === s.id && "active")}
+            onClick={() => setSelectedSport(s.id)}>
+            {s.label}
           </button>
         ))}
       </div>
@@ -404,9 +423,15 @@ export default function FantasyApp() {
           {/* Roster */}
           {activeTab === "roster" && (
             <div className="space-y-2">
-              {(team?.roster || []).map((p: any) => (
+              {rosterFiltered.map((p: any) => (
                 <PlayerCard key={p.id} player={p} compact />
               ))}
+              {rosterFiltered.length === 0 && (team?.roster?.length ?? 0) > 0 && (
+                <div className="glass-card p-6 text-center">
+                  <Search className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No players match your search</p>
+                </div>
+              )}
               {(!team?.roster || team.roster.length === 0) && (
                 <div className="glass-card p-6 text-center">
                   <Trophy className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
@@ -525,7 +550,7 @@ export default function FantasyApp() {
 
         {/* Right sidebar */}
         <div className="space-y-4">
-          <TradeAnalyzer />
+          <TradeAnalyzer sportKey={selectedSport} />
 
           {/* Projections summary */}
           <div className="glass-card p-4 space-y-3">

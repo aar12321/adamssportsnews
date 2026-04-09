@@ -1,4 +1,5 @@
 import type { BetAnalysis, MockBet, MockAccount, BetType } from "@shared/schema";
+import { oddsApiService } from "./oddsApiService";
 
 // In-memory storage for mock betting (per session)
 const mockAccounts = new Map<string, MockAccount>();
@@ -67,21 +68,34 @@ const teamDatabase: Record<string, TeamData> = {
   "Real Madrid": { wins: 26, losses: 3, pointsFor: 2.3, pointsAgainst: 0.6, homeRecord: [14, 1], awayRecord: [12, 2], recentForm: ["W","W","W","W","W"], strengthOfSchedule: 0.65 },
 };
 
+/** Deterministic pseudo-stats for teams not in DB (no Math.random — stable across refreshes). */
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
 function getTeamData(teamName: string): TeamData {
   const data = teamDatabase[teamName];
   if (data) return data;
-  // Generate realistic random data for unknown teams
-  const wins = Math.floor(Math.random() * 30) + 25;
-  const losses = 72 - wins;
+  const h = hashString(teamName.toLowerCase());
+  const wins = 25 + (h % 18);
+  const losses = Math.max(10, 72 - wins - (h % 8));
+  const pf = 105 + (h % 200) / 20;
+  const pa = 103 + ((h >> 3) % 200) / 20;
+  const formBits = h ^ (h >> 5);
+  const recentForm = Array.from({ length: 5 }, (_, i) =>
+    (formBits >> i) & 1 ? "W" : "L"
+  ) as ("W" | "L")[];
   return {
     wins,
     losses,
-    pointsFor: 110 + Math.random() * 15,
-    pointsAgainst: 108 + Math.random() * 15,
-    homeRecord: [Math.floor(wins * 0.6), Math.floor(losses * 0.4)],
-    awayRecord: [Math.floor(wins * 0.4), Math.floor(losses * 0.6)],
-    recentForm: Array.from({ length: 5 }, () => Math.random() > 0.45 ? "W" : "L") as ("W" | "L")[],
-    strengthOfSchedule: 0.45 + Math.random() * 0.1,
+    pointsFor: pf,
+    pointsAgainst: pa,
+    homeRecord: [Math.floor(wins * 0.55), Math.floor(losses * 0.45)],
+    awayRecord: [Math.floor(wins * 0.45), Math.floor(losses * 0.55)],
+    recentForm,
+    strengthOfSchedule: 0.45 + ((h % 100) / 1000),
   };
 }
 
@@ -182,7 +196,7 @@ export class BettingService {
       `has the momentum edge heading into this matchup.`;
 
     return {
-      gameId: `${homeTeam.replace(/\s/g,"-")}-vs-${awayTeam.replace(/\s/g,"-")}`,
+      gameId: `${homeTeam.replace(/\s/g, "-")}-vs-${awayTeam.replace(/\s/g, "-")}`,
       homeTeam,
       awayTeam,
       sport,
@@ -199,6 +213,42 @@ export class BettingService {
       homeRecord: `${homeData.wins}-${homeData.losses}`,
       awayRecord: `${awayData.wins}-${awayData.losses}`,
       analysis,
+      oddsSource: "model",
+    };
+  }
+
+  /** Model-based analysis plus optional The Odds API lines when `ODDS_API_KEY` is set. */
+  async analyzeGameWithOdds(
+    homeTeam: string,
+    awayTeam: string,
+    sport: string,
+    opts?: { eventId?: string }
+  ): Promise<BetAnalysis> {
+    const base = this.analyzeGame(homeTeam, awayTeam, sport);
+    const withId: BetAnalysis = {
+      ...base,
+      eventId: opts?.eventId,
+      oddsSource: "model",
+    };
+
+    const lines = await oddsApiService.findMatchOdds(homeTeam, awayTeam, sport);
+    if (!lines || (lines.homeMoneyline == null && lines.awayMoneyline == null)) {
+      return withId;
+    }
+
+    return {
+      ...withId,
+      oddsSource: "sportsbook",
+      homeMoneyline: lines.homeMoneyline ?? base.homeMoneyline,
+      awayMoneyline: lines.awayMoneyline ?? base.awayMoneyline,
+      recommendedSpread:
+        lines.spread !== undefined && !Number.isNaN(lines.spread)
+          ? lines.spread
+          : base.recommendedSpread,
+      recommendedOverUnder:
+        lines.total !== undefined && !Number.isNaN(lines.total)
+          ? lines.total
+          : base.recommendedOverUnder,
     };
   }
 

@@ -1,14 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  DollarSign, TrendingUp, Target, RotateCcw, ChevronLeft, Zap,
-  BarChart2, Trophy, CheckCircle2, XCircle, Clock, AlertCircle, Flame
+  Target, RotateCcw, ChevronLeft,
+  BarChart2, Trophy, CheckCircle2, XCircle, Clock, AlertCircle, Flame, Search
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
-import { apiRequest } from "@/lib/queryClient";
-
-const SPORTS = ["basketball", "football", "soccer"];
+import { APP_SPORTS } from "@shared/appSports";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { Skeleton } from "@/components/ui/skeleton";
 const SPORT_GAMES: Record<string, { home: string; away: string; league: string }[]> = {
   basketball: [
     { home: "Boston Celtics", away: "Oklahoma City Thunder", league: "NBA" },
@@ -25,6 +25,15 @@ const SPORT_GAMES: Record<string, { home: string; away: string; league: string }
     { home: "Manchester City", away: "Arsenal", league: "Premier League" },
     { home: "Liverpool", away: "Real Madrid", league: "Champions League" },
   ],
+};
+
+type GameRow = {
+  id?: string;
+  home: string;
+  away: string;
+  league: string;
+  startTime?: string;
+  status?: string;
 };
 
 function WinProbabilityBar({ homeTeam, awayTeam, homeProb, awayProb }: {
@@ -71,6 +80,10 @@ function ConfidenceBadge({ confidence }: { confidence: "low" | "medium" | "high"
 }
 
 function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (bet: any) => void }) {
+  const oddsLabel =
+    analysis.oddsSource === "sportsbook"
+      ? "Lines: sportsbook (The Odds API)"
+      : "Lines: internal model (set ODDS_API_KEY for live books)";
   const [betType, setBetType] = useState<"moneyline" | "spread" | "over_under">("moneyline");
   const [selectedTeam, setSelectedTeam] = useState(
     analysis.homeWinProbability > 0.5 ? analysis.homeTeam : analysis.awayTeam
@@ -101,6 +114,9 @@ function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (b
 
   return (
     <div className="glass-card p-5 space-y-5">
+      <p className="text-[11px] text-muted-foreground border border-border/60 rounded-lg px-2 py-1.5 bg-muted/20">
+        {oddsLabel}
+      </p>
       {/* Win probability */}
       <WinProbabilityBar
         homeTeam={analysis.homeTeam}
@@ -321,22 +337,89 @@ function BetHistoryList({ bets }: { bets: any[] }) {
 
 export default function BettingApp() {
   const [selectedSport, setSelectedSport] = useState("basketball");
-  const [selectedGame, setSelectedGame] = useState<{ home: string; away: string; league: string } | null>(null);
+  const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
+  const [gameSearch, setGameSearch] = useState("");
+  const debouncedGameSearch = useDebouncedValue(gameSearch, 300);
   const [activeTab, setActiveTab] = useState<"analyze" | "mybets">("analyze");
   const qc = useQueryClient();
 
-  const { data: analysis, isLoading: analyzing } = useQuery({
-    queryKey: ["/api/betting/analyze", selectedGame?.home, selectedGame?.away],
+  const {
+    data: scheduleData,
+    isLoading: loadingSchedule,
+    isError: scheduleError,
+    refetch: refetchSchedule,
+  } = useQuery({
+    queryKey: ["/api/betting/schedule", selectedSport],
+    queryFn: async () => {
+      const res = await fetch(`/api/betting/schedule?sport=${selectedSport}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load schedule");
+      return data;
+    },
+    staleTime: 60_000,
+    retry: 2,
+  });
+
+  const displayGames: GameRow[] = useMemo(() => {
+    const raw = scheduleData?.games as
+      | { id: string; homeTeam: string; awayTeam: string; league: string; startTime?: string; status?: string }[]
+      | undefined;
+    if (raw?.length) {
+      return raw.map((g) => ({
+        id: g.id,
+        home: g.homeTeam,
+        away: g.awayTeam,
+        league: g.league,
+        startTime: g.startTime,
+        status: g.status,
+      }));
+    }
+    return SPORT_GAMES[selectedSport] || [];
+  }, [scheduleData, selectedSport]);
+
+  const filteredGames = useMemo(() => {
+    const q = debouncedGameSearch.trim().toLowerCase();
+    if (!q) return displayGames;
+    return displayGames.filter(
+      (g) =>
+        g.home.toLowerCase().includes(q) ||
+        g.away.toLowerCase().includes(q) ||
+        g.league.toLowerCase().includes(q)
+    );
+  }, [displayGames, debouncedGameSearch]);
+
+  useEffect(() => {
+    setSelectedGame(null);
+    setGameSearch("");
+  }, [selectedSport]);
+
+  const {
+    data: analysis,
+    isLoading: analyzing,
+    isError: analysisError,
+    error: analysisQueryError,
+  } = useQuery({
+    queryKey: ["/api/betting/analyze", selectedSport, selectedGame?.id, selectedGame?.home, selectedGame?.away],
     queryFn: async () => {
       if (!selectedGame) return null;
       const res = await fetch("/api/betting/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ homeTeam: selectedGame.home, awayTeam: selectedGame.away, sport: selectedSport }),
+        body: JSON.stringify({
+          homeTeam: selectedGame.home,
+          awayTeam: selectedGame.away,
+          sport: selectedSport,
+          eventId: selectedGame.id,
+        }),
       });
-      return res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Analysis request failed");
+      if (data.error) throw new Error(data.error);
+      return data;
     },
     enabled: !!selectedGame,
+    staleTime: 120_000,
+    retry: 1,
   });
 
   const { data: account } = useQuery({
@@ -403,9 +486,11 @@ export default function BettingApp() {
             <ChevronLeft className="w-4 h-4" />
           </a>
         </Link>
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Sports Betting</h1>
-          <p className="text-sm text-muted-foreground">AI-powered analysis & mock betting</p>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight">
+            <span className="gradient-text">Sports Betting</span>
+          </h1>
+          <p className="text-sm text-muted-foreground">Live schedule · model + optional book lines · mock bankroll</p>
         </div>
       </div>
 
@@ -416,23 +501,60 @@ export default function BettingApp() {
 
           {/* Sport selector */}
           <div className="glass-card p-4 space-y-3">
-            <h3 className="font-semibold text-sm text-foreground">Select Game</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-semibold text-sm text-foreground">Matchups</h3>
+              {scheduleData?.games?.length ? (
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-green-400/90 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded-full">
+                  ESPN feed
+                </span>
+              ) : (
+                <span className="text-[10px] font-medium text-muted-foreground">Demo slate</span>
+              )}
+            </div>
+            {scheduleError && (
+              <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive">
+                <span>Couldn&apos;t load schedule</span>
+                <button type="button" className="underline font-medium" onClick={() => refetchSchedule()}>
+                  Retry
+                </button>
+              </div>
+            )}
             <div className="tab-bar">
-              {SPORTS.map(sport => (
-                <button key={sport} className={cn("tab-item text-xs", selectedSport === sport && "active")}
-                  onClick={() => { setSelectedSport(sport); setSelectedGame(null); }}>
-                  {sport.charAt(0).toUpperCase() + sport.slice(1)}
+              {APP_SPORTS.map((s) => (
+                <button
+                  key={s.id}
+                  className={cn("tab-item text-xs", selectedSport === s.id && "active")}
+                  onClick={() => setSelectedSport(s.id)}
+                >
+                  {s.label}
                 </button>
               ))}
             </div>
-            <div className="space-y-2">
-              {(SPORT_GAMES[selectedSport] || []).map(game => (
+            <div className="relative mb-2">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <input
+                type="search"
+                placeholder="Search matchups..."
+                value={gameSearch}
+                onChange={(e) => setGameSearch(e.target.value)}
+                className="input-field pl-9 py-2 text-xs"
+              />
+            </div>
+            <div className="space-y-2 max-h-[min(360px,50vh)] overflow-y-auto pr-1">
+              {loadingSchedule && (
+                <div className="space-y-2">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Skeleton key={i} className="h-[4.5rem] w-full rounded-xl" />
+                  ))}
+                </div>
+              )}
+              {!loadingSchedule && filteredGames.map((game) => (
                 <button
-                  key={`${game.home}-${game.away}`}
+                  key={game.id || `${game.home}-${game.away}-${game.startTime || ""}`}
                   onClick={() => setSelectedGame(game)}
                   className={cn(
                     "w-full text-left p-3 rounded-xl border transition-all",
-                    selectedGame?.home === game.home
+                    selectedGame?.home === game.home && selectedGame?.away === game.away
                       ? "bg-primary/15 border-primary/40 text-foreground"
                       : "bg-muted/30 border-border hover:border-primary/30 text-muted-foreground hover:text-foreground"
                   )}
@@ -440,8 +562,22 @@ export default function BettingApp() {
                   <p className="text-xs font-semibold text-primary mb-1">{game.league}</p>
                   <p className="text-xs font-medium">{game.away}</p>
                   <p className="text-xs text-muted-foreground">@ {game.home}</p>
+                  {game.startTime && (
+                    <p className="text-[10px] text-muted-foreground/80 mt-1 num">
+                      {new Date(game.startTime).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                      {game.status ? ` · ${game.status}` : ""}
+                    </p>
+                  )}
                 </button>
               ))}
+              {!loadingSchedule && filteredGames.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-4">No games match your search</p>
+              )}
             </div>
           </div>
         </div>
@@ -504,12 +640,25 @@ export default function BettingApp() {
                   )}
                 </div>
               ) : analyzing ? (
-                <div className="glass-card p-8 text-center">
-                  <div className="w-12 h-12 rounded-full border-2 border-primary/30 border-t-primary animate-spin mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">Analyzing matchup...</p>
+                <div className="glass-card p-8 text-center space-y-4">
+                  <div className="w-12 h-12 rounded-full border-2 border-primary/30 border-t-primary animate-spin mx-auto" />
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Building your edge</p>
+                    <p className="text-xs text-muted-foreground mt-1">Merging model projections with market data…</p>
+                  </div>
+                  <Skeleton className="h-24 w-full rounded-xl max-w-md mx-auto" />
+                </div>
+              ) : analysisError ? (
+                <div className="glass-card p-6 text-center space-y-3 border-destructive/30">
+                  <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
+                  <p className="text-sm font-medium text-foreground">Analysis unavailable</p>
+                  <p className="text-xs text-muted-foreground">
+                    {(analysisQueryError as Error)?.message || "Try another matchup or retry in a moment."}
+                  </p>
                 </div>
               ) : analysis ? (
                 <AnalysisPanel
+                  key={analysis.gameId || `${selectedGame.home}-${selectedGame.away}`}
                   analysis={analysis}
                   onPlaceBet={(bet) => placeBetMutation.mutate(bet)}
                 />

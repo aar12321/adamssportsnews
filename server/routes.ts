@@ -8,6 +8,7 @@ import { bettingService } from "./bettingService";
 import { fantasyService } from "./fantasyService";
 import { analystService } from "./analystService";
 import { userPreferencesService } from "./userPreferencesService";
+import { espnSportsData } from "./espnSportsData";
 import type { SportId } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -130,13 +131,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ==================== BETTING ====================
 
-  app.post("/api/betting/analyze", (req, res) => {
+  app.get("/api/betting/schedule", async (req, res) => {
     try {
-      const { homeTeam, awayTeam, sport } = req.body;
+      const sportId = req.query.sport as SportId | undefined;
+      const refresh = req.query.refresh === "true";
+      const scores = await scoresService.getLiveScores(sportId, !refresh);
+      res.json({
+        games: scores,
+        totalResults: scores.length,
+        sport: sportId || "all",
+        lastUpdated: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Error fetching betting schedule:", error);
+      res.status(500).json({ error: "Failed to fetch schedule" });
+    }
+  });
+
+  app.post("/api/betting/analyze", async (req, res) => {
+    try {
+      const { homeTeam, awayTeam, sport, eventId } = req.body;
       if (!homeTeam || !awayTeam || !sport) {
         return res.status(400).json({ error: "homeTeam, awayTeam, and sport are required" });
       }
-      const analysis = bettingService.analyzeGame(homeTeam, awayTeam, sport);
+      const analysis = await bettingService.analyzeGameWithOdds(homeTeam, awayTeam, sport, {
+        eventId: typeof eventId === "string" ? eventId : undefined,
+      });
       res.json(analysis);
     } catch (error) {
       console.error("Error analyzing game:", error);
@@ -217,24 +237,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/fantasy/players/search", (req, res) => {
+  app.get("/api/fantasy/players/search", async (req, res) => {
     try {
-      const query = req.query.q as string || "";
-      const sport = req.query.sport as string | undefined;
-      const players = fantasyService.searchPlayers(query, sport);
-      res.json(players);
+      const query = (req.query.q as string) || "";
+      const sport = (req.query.sport as string) || "basketball";
+      const ql = query.trim().toLowerCase();
+      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 60);
+      const fromEspn = espnLeaders.map((p) => fantasyService.playerStatsToFantasy(p));
+      const merged = fantasyService.mergeFantasyWithEspn(sport, fromEspn);
+      if (!ql) {
+        return res.json([]);
+      }
+      const filtered = merged.filter(
+        (p) =>
+          p.name.toLowerCase().includes(ql) ||
+          p.team.toLowerCase().includes(ql) ||
+          p.position.toLowerCase().includes(ql)
+      );
+      res.json(filtered.slice(0, 50));
     } catch (error) {
       res.status(500).json({ error: "Failed to search players" });
     }
   });
 
-  app.get("/api/fantasy/players/top", (req, res) => {
+  app.get("/api/fantasy/players/top", async (req, res) => {
     try {
       const sport = req.query.sport as string || "basketball";
       const position = req.query.position as string | undefined;
       const limit = parseInt(req.query.limit as string) || 20;
-      const players = fantasyService.getTopPlayers(sport, position, limit);
-      res.json(players);
+      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 40);
+      const fromEspn = espnLeaders.map((p) => fantasyService.playerStatsToFantasy(p));
+      const merged = fantasyService.mergeFantasyWithEspn(sport, fromEspn);
+      let list = merged;
+      if (position) {
+        list = merged.filter((p) => p.position.toLowerCase().includes(position.toLowerCase()));
+      }
+      list = [...list].sort((a, b) => b.averagePoints - a.averagePoints).slice(0, limit);
+      res.json(list);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch top players" });
     }
@@ -307,40 +346,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ==================== ANALYST ====================
 
-  app.get("/api/analyst/teams", (req, res) => {
+  app.get("/api/analyst/teams", async (req, res) => {
     try {
       const sport = req.query.sport as string || "basketball";
-      const teams = analystService.getTeamsBySport(sport);
-      res.json(teams);
+      const espn = await espnSportsData.getTeamsForSport(sport as SportId);
+      const merged = analystService.mergeWithEspnTeams(espn, sport);
+      res.json(merged);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch teams" });
     }
   });
 
-  app.get("/api/analyst/teams/search", (req, res) => {
+  app.get("/api/analyst/teams/search", async (req, res) => {
     try {
-      const query = req.query.q as string || "";
-      const sport = req.query.sport as string | undefined;
-      const teams = analystService.searchTeams(query, sport);
-      res.json(teams);
+      const query = (req.query.q as string) || "";
+      const sport = req.query.sport as string || "basketball";
+      const espn = await espnSportsData.getTeamsForSport(sport as SportId);
+      const merged = analystService.mergeWithEspnTeams(espn, sport);
+      const q = query.trim().toLowerCase();
+      if (!q) {
+        return res.json(merged.slice(0, 40));
+      }
+      const filtered = merged.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          t.abbreviation.toLowerCase().includes(q) ||
+          t.league.toLowerCase().includes(q)
+      );
+      res.json(filtered.slice(0, 40));
     } catch (error) {
       res.status(500).json({ error: "Failed to search teams" });
     }
   });
 
-  app.get("/api/analyst/teams/trending", (req, res) => {
+  app.get("/api/analyst/teams/trending", async (req, res) => {
     try {
       const sport = req.query.sport as string || "basketball";
-      const teams = analystService.getTrendingTeams(sport);
-      res.json(teams);
+      const espn = await espnSportsData.getTeamsForSport(sport as SportId);
+      const merged = analystService.mergeWithEspnTeams(espn, sport);
+      const hot = analystService.rankHotTeams(merged, 10);
+      res.json(hot.length > 0 ? hot : analystService.getTrendingTeams(sport));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch trending teams" });
     }
   });
 
-  app.get("/api/analyst/teams/:id", (req, res) => {
+  app.get("/api/analyst/teams/:id", async (req, res) => {
     try {
-      const team = analystService.getTeam(req.params.id);
+      const sport = (req.query.sport as string) || "basketball";
+      const espn = await espnSportsData.getTeamsForSport(sport as SportId);
+      const merged = analystService.mergeWithEspnTeams(espn, sport);
+      const team =
+        merged.find((t) => t.id === req.params.id) ||
+        merged.find((t) => t.name.toLowerCase() === req.params.id.toLowerCase()) ||
+        analystService.getTeam(req.params.id);
       if (!team) return res.status(404).json({ error: "Team not found" });
       res.json(team);
     } catch (error) {
@@ -348,25 +407,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/analyst/teams/compare", (req, res) => {
+  app.post("/api/analyst/teams/compare", async (req, res) => {
     try {
-      const { team1, team2 } = req.body;
+      const { team1, team2, sport = "basketball" } = req.body;
       if (!team1 || !team2) {
         return res.status(400).json({ error: "team1 and team2 are required" });
       }
-      const comparison = analystService.compareTeams(team1, team2);
+      const espn = await espnSportsData.getTeamsForSport(sport as SportId);
+      const merged = analystService.mergeWithEspnTeams(espn, sport);
+      const t1 =
+        merged.find((t) => t.name === team1) ||
+        merged.find((t) => t.name.toLowerCase().includes(team1.toLowerCase())) ||
+        analystService.getTeam(team1);
+      const t2 =
+        merged.find((t) => t.name === team2) ||
+        merged.find((t) => t.name.toLowerCase().includes(team2.toLowerCase())) ||
+        analystService.getTeam(team2);
+      if (!t1 || !t2) {
+        return res.status(404).json({ error: "One or both teams not found" });
+      }
+      if (t1.sport !== t2.sport) {
+        return res.status(400).json({ error: "Teams must be in the same sport for comparison" });
+      }
+      const comparison = analystService.compareTeamStats(t1, t2);
       res.json(comparison);
     } catch (error) {
       res.status(500).json({ error: "Failed to compare teams" });
     }
   });
 
-  app.get("/api/analyst/players/search", (req, res) => {
+  app.get("/api/analyst/players/search", async (req, res) => {
     try {
-      const query = req.query.q as string || "";
-      const sport = req.query.sport as string | undefined;
-      const players = analystService.searchPlayers(query, sport);
-      res.json(players);
+      const query = (req.query.q as string) || "";
+      const sport = (req.query.sport as string) || "basketball";
+      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 80);
+      const merged = analystService.mergePlayerSources(espnLeaders, sport);
+      const ql = query.trim().toLowerCase();
+      if (!ql) {
+        return res.json([]);
+      }
+      const filtered = merged.filter(
+        (p) =>
+          p.name.toLowerCase().includes(ql) ||
+          p.team.toLowerCase().includes(ql) ||
+          p.position.toLowerCase().includes(ql)
+      );
+      res.json(filtered.slice(0, 50));
     } catch (error) {
       res.status(500).json({ error: "Failed to search players" });
     }
@@ -409,9 +495,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/analyst/leaders", (req, res) => {
+  app.get("/api/analyst/leaders", async (req, res) => {
     try {
       const sport = req.query.sport as string || "basketball";
+      const fromEspn = await espnSportsData.getLeaderPlayers(sport as SportId, 30);
+      if (fromEspn.length > 0) {
+        const rows = fromEspn.slice(0, 12).map((p) => {
+          const entries = Object.entries(p.stats);
+          const [cat, val] = entries[0] || ["stat", ""];
+          return {
+            category: cat.replace(/_/g, " "),
+            player: p.name,
+            team: p.team,
+            value: typeof val === "number" ? val.toFixed(1) : String(val),
+          };
+        });
+        return res.json(rows);
+      }
       const leaders = analystService.getLeagueLeaders(sport);
       res.json(leaders);
     } catch (error) {

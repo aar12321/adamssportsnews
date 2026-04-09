@@ -51,7 +51,8 @@ export class AnalystService {
   }
 
   searchPlayers(query: string, sport?: string): PlayerStats[] {
-    const q = query.toLowerCase();
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
     return playerStatsDatabase.filter(p => {
       const matchesQuery = p.name.toLowerCase().includes(q) ||
                           p.team.toLowerCase().includes(q) ||
@@ -61,19 +62,24 @@ export class AnalystService {
     });
   }
 
-  compareTeams(team1Id: string, team2Id: string): {
+  /** Compare two team records (e.g. from ESPN or static DB). Safe when lastTen/streak are placeholders. */
+  compareTeamStats(team1: TeamStats, team2: TeamStats): {
     team1: TeamStats;
     team2: TeamStats;
     categories: { name: string; team1Value: number | string; team2Value: number | string; winner: "team1" | "team2" | "tie" }[];
     team1Advantages: string[];
     team2Advantages: string[];
     prediction: string;
-  } | { error: string } {
-    const team1 = this.getTeam(team1Id);
-    const team2 = this.getTeam(team2Id);
-
-    if (!team1 || !team2) return { error: "One or both teams not found" };
-    if (team1.sport !== team2.sport) return { error: "Teams must be in the same sport for comparison" };
+  } {
+    const parseLastTenWins = (s: string): number => {
+      if (!s || s === "—") return 0;
+      const w = parseInt(s.split("-")[0] ?? "0", 10);
+      return Number.isFinite(w) ? w : 0;
+    };
+    const parseStreakWins = (s: string): number => {
+      if (!s || s === "—") return 0;
+      return s.startsWith("W") ? parseInt(s.slice(1), 10) || 0 : 0;
+    };
 
     const categories = [
       {
@@ -105,8 +111,8 @@ export class AnalystService {
         team1Value: team1.lastTen,
         team2Value: team2.lastTen,
         winner: (() => {
-          const t1 = parseInt(team1.lastTen.split("-")[0]);
-          const t2 = parseInt(team2.lastTen.split("-")[0]);
+          const t1 = parseLastTenWins(team1.lastTen);
+          const t2 = parseLastTenWins(team2.lastTen);
           return (t1 > t2 ? "team1" : t1 < t2 ? "team2" : "tie") as "team1" | "team2" | "tie";
         })()
       },
@@ -115,8 +121,8 @@ export class AnalystService {
         team1Value: team1.streak,
         team2Value: team2.streak,
         winner: (() => {
-          const t1Wins = team1.streak.startsWith("W") ? parseInt(team1.streak.slice(1)) : 0;
-          const t2Wins = team2.streak.startsWith("W") ? parseInt(team2.streak.slice(1)) : 0;
+          const t1Wins = parseStreakWins(team1.streak);
+          const t2Wins = parseStreakWins(team2.streak);
           return (t1Wins > t2Wins ? "team1" : t1Wins < t2Wins ? "team2" : "tie") as "team1" | "team2" | "tie";
         })()
       },
@@ -133,6 +139,37 @@ export class AnalystService {
       `${team1.name} is ${team1.record} (${(team1.winPct * 100).toFixed(0)}%) while ${team2.name} is ${team2.record} (${(team2.winPct * 100).toFixed(0)}%).`;
 
     return { team1, team2, categories, team1Advantages, team2Advantages, prediction };
+  }
+
+  compareTeams(team1Id: string, team2Id: string): {
+    team1: TeamStats;
+    team2: TeamStats;
+    categories: { name: string; team1Value: number | string; team2Value: number | string; winner: "team1" | "team2" | "tie" }[];
+    team1Advantages: string[];
+    team2Advantages: string[];
+    prediction: string;
+  } | { error: string } {
+    const team1 = this.getTeam(team1Id);
+    const team2 = this.getTeam(team2Id);
+
+    if (!team1 || !team2) return { error: "One or both teams not found" };
+    if (team1.sport !== team2.sport) return { error: "Teams must be in the same sport for comparison" };
+
+    return this.compareTeamStats(team1, team2);
+  }
+
+  mergeWithEspnTeams(espnTeams: TeamStats[], sport: string): TeamStats[] {
+    const local = teamDatabase.filter(t => t.sport === sport);
+    const seen = new Set(espnTeams.map(t => t.name.toLowerCase()));
+    const rest = local.filter(t => !seen.has(t.name.toLowerCase()));
+    return [...espnTeams, ...rest];
+  }
+
+  mergePlayerSources(espnPlayers: PlayerStats[], sport: string): PlayerStats[] {
+    const local = playerStatsDatabase.filter(p => p.sport === sport);
+    const seen = new Set(espnPlayers.map(p => p.name.toLowerCase()));
+    const rest = local.filter(p => !seen.has(p.name.toLowerCase()));
+    return [...espnPlayers, ...rest];
   }
 
   comparePlayers(player1Id: string, player2Id: string): {
@@ -221,6 +258,17 @@ export class AnalystService {
       .filter(t => t.sport === sport)
       .filter(t => t.streak.startsWith("W"))
       .sort((a, b) => parseInt(b.streak.slice(1)) - parseInt(a.streak.slice(1)));
+  }
+
+  /** Rank teams for “hot” sidebar when using merged ESPN + static lists. */
+  rankHotTeams(teams: TeamStats[], limit = 10): TeamStats[] {
+    return [...teams]
+      .sort(
+        (a, b) =>
+          b.winPct - a.winPct ||
+          (b.differential ?? 0) - (a.differential ?? 0)
+      )
+      .slice(0, limit);
   }
 
   getLeagueLeaders(sport: string): { category: string; player: string; team: string; value: string }[] {

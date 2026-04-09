@@ -1,4 +1,4 @@
-import type { FantasyPlayer, FantasyTeam, TradeAnalysis, WaiverTarget } from "@shared/schema";
+import type { FantasyPlayer, FantasyTeam, TradeAnalysis, WaiverTarget, PlayerStats } from "@shared/schema";
 
 // Mock player database with realistic data
 const playerDatabase: FantasyPlayer[] = [
@@ -30,6 +30,8 @@ const waiverPlayers: FantasyPlayer[] = [
   { id: "w1", name: "Darius Garland", team: "Cleveland Cavaliers", position: "PG", sport: "basketball", weeklyPoints: 38.2, seasonPoints: 1520, projectedPoints: 36.4, averagePoints: 34.8, status: "active", stats: { ppg: 21.6, rpg: 2.8, apg: 8.6, spg: 1.3, bpg: 0.2, fg_pct: 0.488 }, recentNews: ["Garland goes off for 38 with Haliburton out"], ownership: 34, trending: "up" },
   { id: "w2", name: "Tre Jones", team: "San Antonio Spurs", position: "PG", sport: "basketball", weeklyPoints: 28.4, seasonPoints: 920, projectedPoints: 26.8, averagePoints: 24.6, status: "active", stats: { ppg: 14.8, rpg: 3.2, apg: 6.4, spg: 1.6, bpg: 0.3, fg_pct: 0.512 }, recentNews: ["Jones steps up with 24 points in starting role"], ownership: 18, trending: "up" },
   { id: "w3", name: "Malik Monk", team: "Sacramento Kings", position: "SG", sport: "basketball", weeklyPoints: 32.6, seasonPoints: 1140, projectedPoints: 30.4, averagePoints: 28.2, status: "active", stats: { ppg: 17.4, rpg: 3.8, apg: 5.2, spg: 1.4, bpg: 0.4, fg_pct: 0.468 }, recentNews: ["Monk shooting 48% from three in last 5 games"], ownership: 22, trending: "up" },
+  { id: "w4", name: "Pedro Neto", team: "Chelsea", position: "RW", sport: "soccer", weeklyPoints: 9.2, seasonPoints: 280, projectedPoints: 8.6, averagePoints: 7.8, status: "active", stats: { goals: 6, assists: 9, shots: 42, shots_on_target: 18, minutes: 1680 }, recentNews: ["Neto creating chances off the bench"], ownership: 12, trending: "up" },
+  { id: "w5", name: "Jean-Philippe Mateta", team: "Crystal Palace", position: "ST", sport: "soccer", weeklyPoints: 8.4, seasonPoints: 240, projectedPoints: 7.9, averagePoints: 7.2, status: "active", stats: { goals: 8, assists: 2, shots: 38, shots_on_target: 16, minutes: 1520 }, recentNews: ["Mateta on a scoring run — waiver wire add"], ownership: 9, trending: "up" },
 ];
 
 export class FantasyService {
@@ -190,6 +192,38 @@ export class FantasyService {
       rank: 3,
       standing: "3rd of 12",
     };
+  }
+
+  /** Map ESPN leader row to fantasy scoring shape. */
+  playerStatsToFantasy(p: PlayerStats): FantasyPlayer {
+    const statVals = Object.values(p.stats).filter((v): v is number => typeof v === "number");
+    const avg = statVals.length ? statVals.reduce((a, b) => a + b, 0) / statVals.length : 18;
+    const st =
+      p.status === "injured" ? "injured" :
+      p.status === "out" ? "out" :
+      "active";
+    return {
+      id: p.id,
+      name: p.name,
+      team: p.team,
+      position: p.position,
+      sport: p.sport,
+      weeklyPoints: Math.min(120, Math.round(avg * 1.4 * 10) / 10),
+      seasonPoints: Math.round(avg * 72),
+      projectedPoints: Math.round(avg * 1.05 * 10) / 10,
+      averagePoints: Math.round(avg * 10) / 10,
+      status: st,
+      stats: p.stats as Record<string, number>,
+      recentNews: p.news?.length ? p.news : ["Featured in league leader data"],
+      injuryNote: p.injuryNote,
+    };
+  }
+
+  mergeFantasyWithEspn(sport: string, fromEspn: FantasyPlayer[]): FantasyPlayer[] {
+    const local = this.getAllPlayers(sport);
+    const seen = new Set(fromEspn.map((p) => p.name.toLowerCase()));
+    const rest = local.filter((p) => !seen.has(p.name.toLowerCase()));
+    return [...fromEspn, ...rest];
   }
 }
 
