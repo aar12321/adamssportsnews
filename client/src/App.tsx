@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ViewModeProvider } from "@/contexts/ViewModeContext";
 import { UserPreferencesProvider } from "@/contexts/UserPreferencesContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import MainLayout from "@/components/layout/MainLayout";
 import Dashboard from "@/pages/Dashboard";
 import Apps from "@/pages/Apps";
@@ -13,6 +14,8 @@ import BettingApp from "@/pages/apps/BettingApp";
 import FantasyApp from "@/pages/apps/FantasyApp";
 import AnalystApp from "@/pages/apps/AnalystApp";
 import Profile from "@/pages/Profile";
+import Login from "@/pages/Login";
+import { Loader2 } from "lucide-react";
 
 function Router() {
   return (
@@ -30,6 +33,24 @@ function Router() {
   );
 }
 
+function AuthGate() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login />;
+  }
+
+  return <Router />;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -37,8 +58,10 @@ function App() {
         <ViewModeProvider>
           <UserPreferencesProvider>
             <TooltipProvider>
-              <Toaster />
-              <Router />
+              <AuthProvider>
+                <Toaster />
+                <AuthGate />
+              </AuthProvider>
             </TooltipProvider>
           </UserPreferencesProvider>
         </ViewModeProvider>
