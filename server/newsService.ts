@@ -168,7 +168,7 @@ export class NewsService {
     sportId?: SportId,
     limit: number = 50
   ): Promise<NewsArticle[]> {
-    const espnEndpoints: Record<SportId, string> = {
+    const espnEndpoints: Partial<Record<SportId, string>> = {
       basketball: "http://site.api.espn.com/apis/site/v2/sports/basketball/nba/news",
       football: "http://site.api.espn.com/apis/site/v2/sports/football/nfl/news",
       soccer: "http://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/news",
@@ -182,6 +182,7 @@ export class NewsService {
       const allArticles: NewsArticle[] = [];
 
       for (const endpoint of endpoints) {
+        if (!endpoint) continue;
         const response = await fetch(endpoint, {
           signal: AbortSignal.timeout(10000), // 10 second timeout
         });
@@ -230,15 +231,14 @@ export class NewsService {
       throw new Error("NewsAPI key not configured");
     }
 
-    const sportKeywords: Record<SportId, string> = {
+    const sportKeywords: Partial<Record<SportId, string>> = {
       basketball: "basketball OR NBA",
       football: "NFL OR American football",
       soccer: "soccer OR Premier League OR La Liga OR Champions League",
     };
 
-    const query = sportId
-      ? sportKeywords[sportId]
-      : "basketball OR NBA OR NFL OR football OR soccer OR Premier League";
+    const query = (sportId ? sportKeywords[sportId] : undefined)
+      || "basketball OR NBA OR NFL OR football OR soccer OR Premier League";
 
     try {
       const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(
@@ -307,13 +307,13 @@ export class NewsService {
       throw new Error("Gnews key not configured");
     }
 
-    const sportQueries: Record<SportId, string> = {
+    const sportQueries: Partial<Record<SportId, string>> = {
       basketball: "NBA basketball",
       football: "NFL football",
       soccer: "soccer Premier League",
     };
 
-    const query = sportId ? sportQueries[sportId] : "sports";
+    const query = (sportId ? sportQueries[sportId] : undefined) || "sports";
 
     try {
       const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent(
@@ -363,7 +363,7 @@ export class NewsService {
     sportId?: SportId,
     limit: number = 50
   ): Promise<NewsArticle[]> {
-    const subreddits: Record<SportId, string> = {
+    const subreddits: Partial<Record<SportId, string>> = {
       basketball: "nba",
       football: "nfl",
       soccer: "soccer",
@@ -485,7 +485,7 @@ export class NewsService {
     limit: number = 50
   ): Promise<NewsArticle[]> {
     try {
-      const leagues: Record<SportId, string> = {
+      const leagues: Partial<Record<SportId, string>> = {
         basketball: "4387", // NBA
         football: "4391", // NFL
         soccer: "4328", // Premier League
