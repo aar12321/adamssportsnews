@@ -117,35 +117,68 @@ export class AnalystService {
       return s.startsWith("W") ? parseInt(s.slice(1), 10) || 0 : 0;
     };
 
+    const safeVal = (v: any, fallback = "N/A"): string => {
+      if (v == null || v === "" || v === undefined) return fallback;
+      return String(v);
+    };
+    const safeNum = (v: any): number => (typeof v === "number" && Number.isFinite(v)) ? v : 0;
+
+    // Parse home record wins for comparison
+    const parseRecordWins = (record: string): number => {
+      if (!record || record === "N/A") return 0;
+      const w = parseInt(record.split("-")[0] ?? "0", 10);
+      return Number.isFinite(w) ? w : 0;
+    };
+
     const categories = [
       {
         name: "Win %",
-        team1Value: (team1.winPct * 100).toFixed(1) + "%",
-        team2Value: (team2.winPct * 100).toFixed(1) + "%",
-        winner: (team1.winPct > team2.winPct ? "team1" : team1.winPct < team2.winPct ? "team2" : "tie") as "team1" | "team2" | "tie"
+        team1Value: safeVal(safeNum(team1.winPct) ? (team1.winPct * 100).toFixed(1) + "%" : null),
+        team2Value: safeVal(safeNum(team2.winPct) ? (team2.winPct * 100).toFixed(1) + "%" : null),
+        winner: (safeNum(team1.winPct) > safeNum(team2.winPct) ? "team1" : safeNum(team1.winPct) < safeNum(team2.winPct) ? "team2" : "tie") as "team1" | "team2" | "tie"
       },
       {
         name: "Pts/Game",
-        team1Value: team1.pointsPerGame,
-        team2Value: team2.pointsPerGame,
-        winner: (team1.pointsPerGame > team2.pointsPerGame ? "team1" : team1.pointsPerGame < team2.pointsPerGame ? "team2" : "tie") as "team1" | "team2" | "tie"
+        team1Value: safeVal(team1.pointsPerGame),
+        team2Value: safeVal(team2.pointsPerGame),
+        winner: (safeNum(team1.pointsPerGame) > safeNum(team2.pointsPerGame) ? "team1" : safeNum(team1.pointsPerGame) < safeNum(team2.pointsPerGame) ? "team2" : "tie") as "team1" | "team2" | "tie"
       },
       {
         name: "Pts Allowed",
-        team1Value: team1.pointsAllowed,
-        team2Value: team2.pointsAllowed,
-        winner: (team1.pointsAllowed < team2.pointsAllowed ? "team1" : team1.pointsAllowed > team2.pointsAllowed ? "team2" : "tie") as "team1" | "team2" | "tie"
+        team1Value: safeVal(team1.pointsAllowed),
+        team2Value: safeVal(team2.pointsAllowed),
+        winner: (safeNum(team1.pointsAllowed) < safeNum(team2.pointsAllowed) ? "team1" : safeNum(team1.pointsAllowed) > safeNum(team2.pointsAllowed) ? "team2" : "tie") as "team1" | "team2" | "tie"
       },
       {
         name: "Differential",
-        team1Value: team1.differential > 0 ? "+" + team1.differential.toFixed(1) : team1.differential.toFixed(1),
-        team2Value: team2.differential > 0 ? "+" + team2.differential.toFixed(1) : team2.differential.toFixed(1),
-        winner: (team1.differential > team2.differential ? "team1" : team1.differential < team2.differential ? "team2" : "tie") as "team1" | "team2" | "tie"
+        team1Value: safeVal(team1.differential != null ? (team1.differential > 0 ? "+" + team1.differential.toFixed(1) : team1.differential.toFixed(1)) : null),
+        team2Value: safeVal(team2.differential != null ? (team2.differential > 0 ? "+" + team2.differential.toFixed(1) : team2.differential.toFixed(1)) : null),
+        winner: (safeNum(team1.differential) > safeNum(team2.differential) ? "team1" : safeNum(team1.differential) < safeNum(team2.differential) ? "team2" : "tie") as "team1" | "team2" | "tie"
+      },
+      {
+        name: "Home Record",
+        team1Value: safeVal(team1.homeRecord),
+        team2Value: safeVal(team2.homeRecord),
+        winner: (() => {
+          const t1 = parseRecordWins(team1.homeRecord);
+          const t2 = parseRecordWins(team2.homeRecord);
+          return (t1 > t2 ? "team1" : t1 < t2 ? "team2" : "tie") as "team1" | "team2" | "tie";
+        })()
+      },
+      {
+        name: "Away Record",
+        team1Value: safeVal(team1.awayRecord),
+        team2Value: safeVal(team2.awayRecord),
+        winner: (() => {
+          const t1 = parseRecordWins(team1.awayRecord);
+          const t2 = parseRecordWins(team2.awayRecord);
+          return (t1 > t2 ? "team1" : t1 < t2 ? "team2" : "tie") as "team1" | "team2" | "tie";
+        })()
       },
       {
         name: "Last 10",
-        team1Value: team1.lastTen,
-        team2Value: team2.lastTen,
+        team1Value: safeVal(team1.lastTen),
+        team2Value: safeVal(team2.lastTen),
         winner: (() => {
           const t1 = parseLastTenWins(team1.lastTen);
           const t2 = parseLastTenWins(team2.lastTen);
@@ -154,13 +187,19 @@ export class AnalystService {
       },
       {
         name: "Streak",
-        team1Value: team1.streak,
-        team2Value: team2.streak,
+        team1Value: safeVal(team1.streak),
+        team2Value: safeVal(team2.streak),
         winner: (() => {
           const t1Wins = parseStreakWins(team1.streak);
           const t2Wins = parseStreakWins(team2.streak);
           return (t1Wins > t2Wins ? "team1" : t1Wins < t2Wins ? "team2" : "tie") as "team1" | "team2" | "tie";
         })()
+      },
+      {
+        name: "Record",
+        team1Value: safeVal(team1.record),
+        team2Value: safeVal(team2.record),
+        winner: (safeNum(team1.wins) > safeNum(team2.wins) ? "team1" : safeNum(team1.wins) < safeNum(team2.wins) ? "team2" : "tie") as "team1" | "team2" | "tie"
       },
     ];
 

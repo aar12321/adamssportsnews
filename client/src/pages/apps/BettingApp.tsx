@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Target, RotateCcw, ChevronLeft,
@@ -79,6 +79,10 @@ function ConfidenceBadge({ confidence }: { confidence: "low" | "medium" | "high"
   );
 }
 
+const MemoizedAnalysisPanel = React.memo(AnalysisPanel);
+const MemoizedAccountCard = React.memo(AccountCard);
+const MemoizedBetHistoryList = React.memo(BetHistoryList);
+
 function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (bet: any) => void }) {
   const oddsLabel =
     analysis.oddsSource === "sportsbook"
@@ -130,13 +134,17 @@ function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (b
         <div className="bg-muted/50 rounded-xl p-3">
           <p className="text-xs text-muted-foreground mb-1">Recommended Spread</p>
           <p className="text-lg font-bold text-foreground">
-            {analysis.recommendedSpread > 0 ? "+" : ""}{analysis.recommendedSpread}
+            {analysis.recommendedSpread != null
+              ? `${analysis.recommendedSpread > 0 ? "+" : ""}${analysis.recommendedSpread}`
+              : "Pending analysis"}
           </p>
-          <p className="text-xs text-muted-foreground">{analysis.homeTeam}</p>
+          <p className="text-xs text-muted-foreground">{analysis.homeTeam || "—"}</p>
         </div>
         <div className="bg-muted/50 rounded-xl p-3">
           <p className="text-xs text-muted-foreground mb-1">Over/Under</p>
-          <p className="text-lg font-bold text-foreground">{analysis.recommendedOverUnder}</p>
+          <p className="text-lg font-bold text-foreground">
+            {analysis.recommendedOverUnder != null ? analysis.recommendedOverUnder : "Pending analysis"}
+          </p>
           <p className="text-xs text-muted-foreground">Total points</p>
         </div>
       </div>
@@ -145,16 +153,16 @@ function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (b
       <div className="grid grid-cols-2 gap-3">
         <div className={cn("p-3 rounded-xl border cursor-pointer transition-all", selectedTeam === analysis.homeTeam && betType === "moneyline" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30")}
           onClick={() => { setBetType("moneyline"); setSelectedTeam(analysis.homeTeam); }}>
-          <p className="text-xs text-muted-foreground truncate">{analysis.homeTeam}</p>
+          <p className="text-xs text-muted-foreground truncate">{analysis.homeTeam || "—"}</p>
           <p className={cn("text-base font-bold num", analysis.homeMoneyline < 0 ? "text-green-400" : "text-foreground")}>
-            {formatOdds(analysis.homeMoneyline)}
+            {analysis.homeMoneyline != null ? formatOdds(analysis.homeMoneyline) : "Pending analysis"}
           </p>
         </div>
         <div className={cn("p-3 rounded-xl border cursor-pointer transition-all", selectedTeam === analysis.awayTeam && betType === "moneyline" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30")}
           onClick={() => { setBetType("moneyline"); setSelectedTeam(analysis.awayTeam); }}>
-          <p className="text-xs text-muted-foreground truncate">{analysis.awayTeam}</p>
+          <p className="text-xs text-muted-foreground truncate">{analysis.awayTeam || "—"}</p>
           <p className={cn("text-base font-bold num", analysis.awayMoneyline < 0 ? "text-green-400" : "text-foreground")}>
-            {formatOdds(analysis.awayMoneyline)}
+            {analysis.awayMoneyline != null ? formatOdds(analysis.awayMoneyline) : "Pending analysis"}
           </p>
         </div>
       </div>
@@ -428,7 +436,8 @@ export default function BettingApp() {
       const res = await fetch("/api/betting/account/default");
       return res.json();
     },
-    refetchInterval: 5000,
+    refetchInterval: 30000,
+    staleTime: 25000,
   });
 
   const { data: bets } = useQuery({
@@ -437,7 +446,8 @@ export default function BettingApp() {
       const res = await fetch("/api/betting/bets/default");
       return res.json();
     },
-    refetchInterval: 3000,
+    refetchInterval: 30000,
+    staleTime: 25000,
   });
 
   const { data: trending } = useQuery({
@@ -447,6 +457,19 @@ export default function BettingApp() {
       return res.json();
     },
   });
+
+  const handlePlaceBet = useCallback((bet: any) => {
+    placeBetMutation.mutate(bet);
+  }, []);
+
+  const handleReset = useCallback(() => {
+    resetMutation.mutate();
+  }, []);
+
+  const pendingBetsCount = useMemo(() => {
+    if (!bets) return 0;
+    return bets.filter((b: any) => b.status === "pending").length;
+  }, [bets]);
 
   const placeBetMutation = useMutation({
     mutationFn: async (betData: any) => {
@@ -497,7 +520,7 @@ export default function BettingApp() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left: Account + controls */}
         <div className="space-y-4">
-          <AccountCard account={account} onReset={() => resetMutation.mutate()} />
+          <MemoizedAccountCard account={account} onReset={handleReset} />
 
           {/* Sport selector */}
           <div className="glass-card p-4 space-y-3">
@@ -598,9 +621,9 @@ export default function BettingApp() {
               <span className="flex items-center justify-center gap-1.5">
                 <Trophy className="w-4 h-4" />
                 My Bets
-                {bets && bets.filter((b: any) => b.status === "pending").length > 0 && (
+                {pendingBetsCount > 0 && (
                   <span className="bg-yellow-500/20 text-yellow-400 text-xs px-1.5 rounded-full">
-                    {bets.filter((b: any) => b.status === "pending").length}
+                    {pendingBetsCount}
                   </span>
                 )}
               </span>
@@ -657,10 +680,10 @@ export default function BettingApp() {
                   </p>
                 </div>
               ) : analysis ? (
-                <AnalysisPanel
+                <MemoizedAnalysisPanel
                   key={analysis.gameId || `${selectedGame.home}-${selectedGame.away}`}
                   analysis={analysis}
-                  onPlaceBet={(bet) => placeBetMutation.mutate(bet)}
+                  onPlaceBet={handlePlaceBet}
                 />
               ) : null}
               {placeBetMutation.isError && (
@@ -679,7 +702,7 @@ export default function BettingApp() {
           )}
 
           {activeTab === "mybets" && (
-            <BetHistoryList bets={bets || []} />
+            <MemoizedBetHistoryList bets={bets || []} />
           )}
         </div>
       </div>

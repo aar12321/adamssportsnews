@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { APP_SPORTS } from "@shared/appSports";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const STATUS_CONFIG = {
   active: { label: "Active", className: "text-green-400 bg-green-500/10" },
@@ -16,6 +17,8 @@ const STATUS_CONFIG = {
   out: { label: "Out", className: "text-red-500 bg-red-500/15 font-bold" },
   questionable: { label: "Quest.", className: "text-yellow-400 bg-yellow-500/10" },
 };
+
+const MemoizedPlayerCard = React.memo(PlayerCard);
 
 function PlayerCard({ player, compact = false }: { player: any; compact?: boolean }) {
   const statusConfig = STATUS_CONFIG[player.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.active;
@@ -40,7 +43,7 @@ function PlayerCard({ player, compact = false }: { player: any; compact?: boolea
             {statusConfig.label}
           </span>
           <div className="text-right">
-            <p className="text-sm font-bold text-foreground num">{player.projectedPoints?.toFixed(1)}</p>
+            <p className="text-sm font-bold text-foreground num">{player.projectedPoints != null ? player.projectedPoints.toFixed(1) : "—"}</p>
             <p className="text-xs text-muted-foreground">proj</p>
           </div>
         </div>
@@ -78,15 +81,15 @@ function PlayerCard({ player, compact = false }: { player: any; compact?: boolea
       <div className="grid grid-cols-3 gap-2 mb-4">
         <div className="bg-muted/50 rounded-xl p-2.5 text-center">
           <p className="text-xs text-muted-foreground">Season Avg</p>
-          <p className="text-base font-bold text-foreground num">{player.averagePoints?.toFixed(1)}</p>
+          <p className="text-base font-bold text-foreground num">{player.averagePoints != null ? player.averagePoints.toFixed(1) : "—"}</p>
         </div>
         <div className="bg-muted/50 rounded-xl p-2.5 text-center">
           <p className="text-xs text-muted-foreground">Projected</p>
-          <p className="text-base font-bold text-primary num">{player.projectedPoints?.toFixed(1)}</p>
+          <p className="text-base font-bold text-primary num">{player.projectedPoints != null ? player.projectedPoints.toFixed(1) : "—"}</p>
         </div>
         <div className="bg-muted/50 rounded-xl p-2.5 text-center">
           <p className="text-xs text-muted-foreground">Last Week</p>
-          <p className="text-base font-bold text-foreground num">{player.weeklyPoints?.toFixed(1)}</p>
+          <p className="text-base font-bold text-foreground num">{player.weeklyPoints != null ? player.weeklyPoints.toFixed(1) : "—"}</p>
         </div>
       </div>
 
@@ -94,7 +97,7 @@ function PlayerCard({ player, compact = false }: { player: any; compact?: boolea
       <div className="flex flex-wrap gap-1.5 mb-3">
         {Object.entries(player.stats || {}).slice(0, 5).map(([key, value]) => (
           <span key={key} className="px-2 py-1 bg-muted/50 rounded-lg text-xs text-muted-foreground">
-            <span className="font-bold text-foreground num">{typeof value === "number" ? value.toFixed(1) : value as string}</span> {key.replace("_", "/")}
+            <span className="font-bold text-foreground num">{value != null ? (typeof value === "number" ? value.toFixed(1) : value as string) : "—"}</span> {key.replace("_", "/")}
           </span>
         ))}
       </div>
@@ -197,7 +200,7 @@ function TradeAnalyzer({ sportKey }: { sportKey: string }) {
                     <p className="text-xs text-muted-foreground">{p.position} · {p.team.split(" ").slice(-1)[0]}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-bold text-foreground num">{p.averagePoints.toFixed(1)}</p>
+                    <p className="text-sm font-bold text-foreground num">{p.averagePoints != null ? p.averagePoints.toFixed(1) : "\u2014"}</p>
                     <p className="text-xs text-muted-foreground">avg/wk</p>
                   </div>
                 </button>
@@ -303,7 +306,13 @@ export default function FantasyApp() {
     staleTime: 60_000,
   });
 
-  const displayPlayers = debouncedSearch.trim().length > 1 ? (searchResults || []) : (topPlayers || []);
+  const displayPlayers = useMemo(() => {
+    return debouncedSearch.trim().length > 1 ? (searchResults || []) : (topPlayers || []);
+  }, [debouncedSearch, searchResults, topPlayers]);
+
+  const sortedTopProjections = useMemo(() => {
+    return (topPlayers || []).slice(0, 5);
+  }, [topPlayers]);
 
   const rosterFiltered = useMemo(() => {
     const r = team?.roster || [];
@@ -363,7 +372,7 @@ export default function FantasyApp() {
               </div>
               <div className="text-right">
                 <p className="text-xs text-muted-foreground">This Week</p>
-                <p className="text-sm font-bold text-green-400 num">{team.weeklyPoints?.toFixed(1)}</p>
+                <p className="text-sm font-bold text-green-400 num">{team.weeklyPoints != null ? team.weeklyPoints.toFixed(1) : "\u2014"}</p>
               </div>
             </div>
           </div>
@@ -424,7 +433,7 @@ export default function FantasyApp() {
           {activeTab === "roster" && (
             <div className="space-y-2">
               {rosterFiltered.map((p: any) => (
-                <PlayerCard key={p.id} player={p} compact />
+                <MemoizedPlayerCard key={p.id} player={p} compact />
               ))}
               {rosterFiltered.length === 0 && (team?.roster?.length ?? 0) > 0 && (
                 <div className="glass-card p-6 text-center">
@@ -446,14 +455,35 @@ export default function FantasyApp() {
             loadingPlayers ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[...Array(4)].map((_, i) => (
-                  <div key={i} className="glass-card p-5 animate-pulse h-48" />
+                  <div key={i} className="glass-card p-5 space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <Skeleton className="w-12 h-12 rounded-2xl" />
+                        <div className="space-y-2">
+                          <Skeleton className="h-4 w-28" />
+                          <Skeleton className="h-3 w-20" />
+                        </div>
+                      </div>
+                      <Skeleton className="h-6 w-16 rounded-lg" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Skeleton className="h-14 rounded-xl" />
+                      <Skeleton className="h-14 rounded-xl" />
+                      <Skeleton className="h-14 rounded-xl" />
+                    </div>
+                    <div className="flex gap-1.5">
+                      <Skeleton className="h-6 w-16 rounded-lg" />
+                      <Skeleton className="h-6 w-16 rounded-lg" />
+                      <Skeleton className="h-6 w-16 rounded-lg" />
+                    </div>
+                  </div>
                 ))}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {displayPlayers.map((p: any, i: number) => (
                   <div key={p.id} className={cn("animate-fade-in", `stagger-${Math.min(i+1, 4)}`)}>
-                    <PlayerCard player={p} />
+                    <MemoizedPlayerCard player={p} />
                   </div>
                 ))}
               </div>
@@ -463,6 +493,26 @@ export default function FantasyApp() {
           {/* Waiver wire */}
           {activeTab === "waiver" && (
             <div className="space-y-3">
+              {!waiverTargets && (
+                <div className="space-y-3">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="glass-card p-4 space-y-2">
+                      <div className="flex items-start justify-between">
+                        <div className="space-y-2">
+                          <Skeleton className="h-4 w-32" />
+                          <Skeleton className="h-3 w-24" />
+                        </div>
+                        <Skeleton className="h-6 w-16 rounded-lg" />
+                      </div>
+                      <Skeleton className="h-3 w-full" />
+                      <div className="flex justify-between">
+                        <Skeleton className="h-3 w-20" />
+                        <Skeleton className="h-3 w-16" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               {(waiverTargets || []).map((target: any, i: number) => (
                 <div key={i} className={cn(
                   "glass-card p-4 border-l-4",
@@ -492,7 +542,7 @@ export default function FantasyApp() {
                     <div className="flex items-center gap-1">
                       {target.player.trending === "up" && <TrendingUp className="w-3.5 h-3.5 text-green-400" />}
                       <span className="text-xs font-bold text-foreground num">
-                        {target.player.projectedPoints.toFixed(1)} pts
+                        {target.player.projectedPoints != null ? target.player.projectedPoints.toFixed(1) : "\u2014"} pts
                       </span>
                     </div>
                   </div>
@@ -504,6 +554,27 @@ export default function FantasyApp() {
           {/* Injuries */}
           {activeTab === "injuries" && (
             <div className="space-y-2">
+              {!injuredPlayers && (
+                <div className="space-y-2">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="glass-card p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="h-4 w-28" />
+                            <Skeleton className="h-5 w-14 rounded" />
+                          </div>
+                          <Skeleton className="h-3 w-20" />
+                        </div>
+                        <div className="space-y-1">
+                          <Skeleton className="h-4 w-10 ml-auto" />
+                          <Skeleton className="h-3 w-12" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               {(injuredPlayers || []).map((p: any) => (
                 <div key={p.id} className={cn(
                   "glass-card p-4 border-l-4",
@@ -526,7 +597,7 @@ export default function FantasyApp() {
                       <p className="text-xs text-muted-foreground">{p.position} · {p.team}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-bold text-muted-foreground num">{p.projectedPoints.toFixed(1)}</p>
+                      <p className="text-sm font-bold text-muted-foreground num">{p.projectedPoints != null ? p.projectedPoints.toFixed(1) : "\u2014"}</p>
                       <p className="text-xs text-muted-foreground">proj pts</p>
                     </div>
                   </div>
@@ -567,7 +638,7 @@ export default function FantasyApp() {
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {p.trending === "up" && <TrendingUp className="w-3 h-3 text-green-400" />}
-                    <span className="text-sm font-bold text-primary num">{p.projectedPoints.toFixed(1)}</span>
+                    <span className="text-sm font-bold text-primary num">{p.projectedPoints != null ? p.projectedPoints.toFixed(1) : "\u2014"}</span>
                   </div>
                 </div>
               ))}

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { APP_SPORTS } from "@shared/appSports";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from "recharts";
 
 function FormBadges({ form }: { form: string[] }) {
@@ -26,6 +27,8 @@ function FormBadges({ form }: { form: string[] }) {
     </div>
   );
 }
+
+const MemoizedTeamCard = React.memo(TeamCard);
 
 function TeamCard({ team, onClick, isSelected }: { team: any; onClick: () => void; isSelected: boolean }) {
   const isSoccer = team.sport === "soccer";
@@ -248,55 +251,79 @@ function ComparisonView({ sport }: { sport: string }) {
       </div>
 
       {isLoading && (
-        <div className="text-center py-8">
-          <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin mx-auto" />
+        <div className="space-y-4 py-4">
+          <div className="flex items-center justify-center gap-3">
+            <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+            <p className="text-sm text-muted-foreground">Comparing teams...</p>
+          </div>
+          <div className="space-y-2">
+            {[...Array(6)].map((_, i) => (
+              <Skeleton key={i} className="h-8 w-full rounded-xl" />
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Skeleton className="h-24 rounded-xl" />
+            <Skeleton className="h-24 rounded-xl" />
+          </div>
         </div>
       )}
 
       {comparison && !comparison.error && (
         <div className="space-y-3 animate-fade-in">
-          <p className="text-sm text-muted-foreground">{comparison.prediction}</p>
+          <p className="text-sm text-muted-foreground">{comparison.prediction || "No prediction available"}</p>
 
           <div className="space-y-2">
-            {comparison.categories?.map((cat: any) => (
+            {comparison.categories?.length > 0 ? comparison.categories.map((cat: any) => (
               <div key={cat.name} className="flex items-center gap-3">
                 <span className={cn(
                   "text-xs font-bold min-w-[60px] text-right",
                   cat.winner === "team1" ? "text-green-400" : "text-muted-foreground"
                 )}>
-                  {cat.team1Value}
+                  {cat.team1Value != null && cat.team1Value !== "" ? cat.team1Value : "N/A"}
                 </span>
                 <div className="flex-1">
                   <div className="text-center text-xs text-muted-foreground mb-1">{cat.name}</div>
                   <div className="relative h-1.5 bg-muted rounded-full overflow-hidden">
                     <div className={cn(
                       "absolute left-0 top-0 h-full rounded-full transition-all duration-500",
-                      cat.winner === "team1" ? "bg-green-400" : "bg-red-400"
-                    )} style={{ width: cat.winner === "team1" ? "100%" : "0%" }} />
+                      cat.winner === "team1" ? "bg-green-400" : cat.winner === "tie" ? "bg-yellow-400" : "bg-red-400"
+                    )} style={{ width: cat.winner === "team1" ? "100%" : cat.winner === "tie" ? "50%" : "0%" }} />
                   </div>
                 </div>
                 <span className={cn(
                   "text-xs font-bold min-w-[60px]",
                   cat.winner === "team2" ? "text-green-400" : "text-muted-foreground"
                 )}>
-                  {cat.team2Value}
+                  {cat.team2Value != null && cat.team2Value !== "" ? cat.team2Value : "N/A"}
                 </span>
               </div>
-            ))}
+            )) : (
+              <div className="glass-card p-4 text-center">
+                <p className="text-xs text-muted-foreground">No comparison categories available</p>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3">
               <p className="text-xs font-bold text-green-400 mb-1">{selectedTeam1} Advantages</p>
-              {comparison.team1Advantages?.map((a: string, i: number) => (
-                <p key={i} className="text-xs text-muted-foreground">• {a}</p>
-              ))}
+              {comparison.team1Advantages?.length > 0 ? (
+                comparison.team1Advantages.map((a: string, i: number) => (
+                  <p key={i} className="text-xs text-muted-foreground">&#8226; {a}</p>
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground italic">No advantages found</p>
+              )}
             </div>
             <div className="bg-primary/10 border border-primary/20 rounded-xl p-3">
               <p className="text-xs font-bold text-primary mb-1">{selectedTeam2} Advantages</p>
-              {comparison.team2Advantages?.map((a: string, i: number) => (
-                <p key={i} className="text-xs text-muted-foreground">• {a}</p>
-              ))}
+              {comparison.team2Advantages?.length > 0 ? (
+                comparison.team2Advantages.map((a: string, i: number) => (
+                  <p key={i} className="text-xs text-muted-foreground">&#8226; {a}</p>
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground italic">No advantages found</p>
+              )}
             </div>
           </div>
         </div>
@@ -385,9 +412,39 @@ export default function AnalystApp() {
     staleTime: 120_000,
   });
 
-  const filteredTeams = teams?.filter((t: any) =>
-    !searchQuery || t.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredTeams = useMemo(() => {
+    return teams?.filter((t: any) =>
+      !searchQuery || t.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [teams, searchQuery]);
+
+  const chartData = useMemo(() => {
+    if (!teams || teams.length === 0) return [];
+    return teams.slice(0, 6).map((t: any) => ({
+      name: t.abbreviation || t.name.split(" ").slice(-1)[0],
+      For: t.pointsPerGame,
+      Against: t.pointsAllowed,
+    }));
+  }, [teams]);
+
+  const handleSelectTeam = useCallback((team: any) => {
+    setSelectedTeam(team);
+  }, []);
+
+  const handleClearTeam = useCallback(() => {
+    setSelectedTeam(null);
+  }, []);
+
+  const handleTabChange = useCallback((key: typeof activeTab) => {
+    setActiveTab(key);
+    setSelectedTeam(null);
+  }, []);
+
+  const handleSportChange = useCallback((sportId: string) => {
+    setSelectedSport(sportId);
+    setSelectedTeam(null);
+    setSearchQuery("");
+  }, []);
 
   return (
     <div className="animate-fade-in max-w-6xl">
@@ -410,7 +467,7 @@ export default function AnalystApp() {
       <div className="tab-bar mb-5">
         {APP_SPORTS.map((s) => (
           <button key={s.id} className={cn("tab-item", selectedSport === s.id && "active")}
-            onClick={() => { setSelectedSport(s.id); setSelectedTeam(null); setSearchQuery(""); }}>
+            onClick={() => handleSportChange(s.id)}>
             {s.label}
           </button>
         ))}
@@ -429,7 +486,7 @@ export default function AnalystApp() {
             ].map(({ key, label, Icon }) => (
               <button
                 key={key}
-                onClick={() => { setActiveTab(key as typeof activeTab); setSelectedTeam(null); }}
+                onClick={() => handleTabChange(key as typeof activeTab)}
                 className={cn(
                   "flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all",
                   activeTab === key
@@ -476,7 +533,7 @@ export default function AnalystApp() {
                 {trending.slice(0, 3).map((t: any) => (
                   <button
                     key={t.id}
-                    onClick={() => setSelectedTeam(t)}
+                    onClick={() => handleSelectTeam(t)}
                     className="w-full flex items-center justify-between p-2.5 bg-muted/30 hover:bg-muted/50 rounded-xl transition-all"
                   >
                     <span className="text-xs font-medium text-foreground">{t.name}</span>
@@ -492,16 +549,34 @@ export default function AnalystApp() {
             loadingTeams ? (
               <div className="space-y-3">
                 {[...Array(4)].map((_, i) => (
-                  <div key={i} className="glass-card p-4 animate-pulse h-32" />
+                  <div key={i} className="glass-card p-4 space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div className="space-y-2">
+                        <Skeleton className="h-4 w-36" />
+                        <Skeleton className="h-3 w-24" />
+                      </div>
+                      <Skeleton className="h-5 w-16 rounded-full" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Skeleton className="h-12 rounded-xl" />
+                      <Skeleton className="h-12 rounded-xl" />
+                      <Skeleton className="h-12 rounded-xl" />
+                    </div>
+                    <div className="flex gap-1">
+                      {[...Array(5)].map((_, j) => (
+                        <Skeleton key={j} className="w-5 h-5 rounded" />
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             ) : (
               <div className="space-y-3">
                 {(filteredTeams || []).map((team: any) => (
-                  <TeamCard
+                  <MemoizedTeamCard
                     key={team.id}
                     team={team}
-                    onClick={() => setSelectedTeam(team)}
+                    onClick={() => handleSelectTeam(team)}
                     isSelected={selectedTeam?.id === team.id}
                   />
                 ))}
@@ -533,7 +608,9 @@ export default function AnalystApp() {
                     {Object.entries(player.stats || {}).slice(0, 4).map(([key, value]) => (
                       <span key={key} className="px-2 py-0.5 bg-muted/50 rounded text-xs text-muted-foreground">
                         <span className="font-bold text-foreground num">
-                          {typeof value === "number" ? (value > 1 ? value.toFixed(1) : (value * 100).toFixed(1) + "%") : value as string}
+                          {value != null
+                            ? (typeof value === "number" ? (value > 1 ? value.toFixed(1) : (value * 100).toFixed(1) + "%") : String(value))
+                            : "\u2014"}
                         </span> {key.replace(/_/g, " ")}
                       </span>
                     ))}
@@ -550,7 +627,20 @@ export default function AnalystApp() {
               {loadingPlayers && (
                 <div className="space-y-3">
                   {[...Array(4)].map((_, i) => (
-                    <div key={i} className="glass-card p-4 animate-pulse h-24" />
+                    <div key={i} className="glass-card p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-2">
+                          <Skeleton className="h-4 w-32" />
+                          <Skeleton className="h-3 w-24" />
+                        </div>
+                        <Skeleton className="h-4 w-12" />
+                      </div>
+                      <div className="flex gap-1.5">
+                        <Skeleton className="h-5 w-16 rounded" />
+                        <Skeleton className="h-5 w-16 rounded" />
+                        <Skeleton className="h-5 w-16 rounded" />
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -573,7 +663,7 @@ export default function AnalystApp() {
           {selectedTeam ? (
             <div>
               <button
-                onClick={() => setSelectedTeam(null)}
+                onClick={handleClearTeam}
                 className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -600,17 +690,13 @@ export default function AnalystApp() {
               </div>
 
               {/* Teams overview bar chart */}
-              {teams && teams.length > 0 && (
+              {chartData.length > 0 && (
                 <div className="glass-card p-5">
                   <h3 className="font-bold text-foreground mb-4">
                     {selectedSport === "soccer" ? "Goals vs. conceded (top clubs)" : "Offense vs. defense snapshot"}
                   </h3>
                   <ResponsiveContainer width="100%" height={240}>
-                    <BarChart data={teams.slice(0, 6).map((t: any) => ({
-                      name: t.abbreviation || t.name.split(" ").slice(-1)[0],
-                      For: t.pointsPerGame,
-                      Against: t.pointsAllowed,
-                    }))}>
+                    <BarChart data={chartData}>
                       <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#888" }} />
                       <YAxis tick={{ fontSize: 10, fill: "#888" }} domain={['auto', 'auto']} />
                       <Tooltip

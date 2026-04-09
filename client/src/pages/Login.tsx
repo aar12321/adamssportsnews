@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { Trophy, Mail, Lock, Loader2 } from "lucide-react";
+import { Trophy, Mail, Lock, Loader2, LogIn } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { checkAurzoSession } from "@/lib/aurzo-auth";
 
 export default function Login() {
   const { signIn } = useAuth();
@@ -8,6 +9,26 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [aurzoLoading, setAurzoLoading] = useState(false);
+
+  const handleAurzoSignIn = async () => {
+    setError(null);
+    setAurzoLoading(true);
+    try {
+      const aurzoUser = await checkAurzoSession();
+      if (aurzoUser) {
+        // Session exists -- the AuthContext listener will pick up the state change
+        window.location.reload();
+      } else {
+        // No existing Aurzo session, prompt for email/password
+        setError("No active Aurzo session found. Please sign in with your email and password below.");
+      }
+    } catch (err) {
+      setError("Could not check Aurzo session. Please sign in with email below.");
+    } finally {
+      setAurzoLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,14 +56,42 @@ export default function Login() {
 
         {/* Card */}
         <div className="bg-card border border-border rounded-2xl p-6 shadow-xl">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Error */}
-            {error && (
-              <div className="bg-destructive/10 border border-destructive/20 text-destructive text-sm rounded-xl px-4 py-3">
-                {error}
-              </div>
-            )}
+          {/* Error */}
+          {error && (
+            <div className="bg-destructive/10 border border-destructive/20 text-destructive text-sm rounded-xl px-4 py-3 mb-4">
+              {error}
+            </div>
+          )}
 
+          {/* Aurzo SSO Button */}
+          <button
+            type="button"
+            onClick={handleAurzoSignIn}
+            disabled={aurzoLoading}
+            className="w-full h-12 bg-gradient-to-r from-primary to-purple-600 text-primary-foreground font-semibold rounded-xl text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2.5 shadow-lg shadow-primary/25"
+          >
+            {aurzoLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Checking session...
+              </>
+            ) : (
+              <>
+                <LogIn className="w-4 h-4" />
+                Sign in with Aurzo Account
+              </>
+            )}
+          </button>
+
+          {/* Divider */}
+          <div className="my-5 flex items-center gap-3">
+            <div className="flex-1 h-px bg-border" />
+            <span className="text-xs text-muted-foreground">or sign in with email</span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
+
+          {/* Email/Password Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
             {/* Email */}
             <div className="space-y-2">
               <label htmlFor="email" className="text-sm font-medium text-foreground">
