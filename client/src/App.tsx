@@ -3,15 +3,30 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ThemeProvider } from "@/contexts/ThemeProvider";
+import { ThemeProvider } from "@/contexts/ThemeContext";
+import { ViewModeProvider } from "@/contexts/ViewModeContext";
+import { UserPreferencesProvider } from "@/contexts/UserPreferencesContext";
+import MainLayout from "@/components/layout/MainLayout";
 import Dashboard from "@/pages/Dashboard";
+import Apps from "@/pages/Apps";
+import BettingApp from "@/pages/apps/BettingApp";
+import FantasyApp from "@/pages/apps/FantasyApp";
+import AnalystApp from "@/pages/apps/AnalystApp";
+import Profile from "@/pages/Profile";
 
 function Router() {
   return (
-    <Switch>
-      <Route path="/" component={Dashboard} />
-      <Route component={Dashboard} />
-    </Switch>
+    <MainLayout>
+      <Switch>
+        <Route path="/" component={Dashboard} />
+        <Route path="/apps" component={Apps} />
+        <Route path="/apps/betting" component={BettingApp} />
+        <Route path="/apps/fantasy" component={FantasyApp} />
+        <Route path="/apps/analyst" component={AnalystApp} />
+        <Route path="/profile" component={Profile} />
+        <Route component={Dashboard} />
+      </Switch>
+    </MainLayout>
   );
 }
 
@@ -19,10 +34,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
+        <ViewModeProvider>
+          <UserPreferencesProvider>
+            <TooltipProvider>
+              <Toaster />
+              <Router />
+            </TooltipProvider>
+          </UserPreferencesProvider>
+        </ViewModeProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

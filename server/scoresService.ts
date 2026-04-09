@@ -102,7 +102,7 @@ export class ScoresService {
    * Fetch scores from ESPN API
    */
   private async fetchFromESPN(sportId?: SportId): Promise<Score[]> {
-    const espnEndpoints: Record<SportId, string> = {
+    const espnEndpoints: Partial<Record<SportId, string>> = {
       basketball: "http://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
       football: "http://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
       soccer: "http://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard",
@@ -116,6 +116,7 @@ export class ScoresService {
       const allScores: Score[] = [];
 
       for (const endpoint of endpoints) {
+        if (!endpoint) continue;
         const response = await fetch(endpoint);
         if (!response.ok) continue;
 
@@ -163,7 +164,7 @@ export class ScoresService {
    * Fetch scores from TheSportsDB
    */
   private async fetchFromTheSportsDB(sportId?: SportId): Promise<Score[]> {
-    const leagues: Record<SportId, string> = {
+    const leagues: Partial<Record<SportId, string>> = {
       basketball: "4387", // NBA
       football: "4391", // NFL
       soccer: "4328", // Premier League

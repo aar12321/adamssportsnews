@@ -1,0 +1,539 @@
+import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  DollarSign, TrendingUp, Target, RotateCcw, ChevronLeft, Zap,
+  BarChart2, Trophy, CheckCircle2, XCircle, Clock, AlertCircle, Flame
+} from "lucide-react";
+import { Link } from "wouter";
+import { cn } from "@/lib/utils";
+import { apiRequest } from "@/lib/queryClient";
+
+const SPORTS = ["basketball", "football", "soccer"];
+const SPORT_GAMES: Record<string, { home: string; away: string; league: string }[]> = {
+  basketball: [
+    { home: "Boston Celtics", away: "Oklahoma City Thunder", league: "NBA" },
+    { home: "Denver Nuggets", away: "Cleveland Cavaliers", league: "NBA" },
+    { home: "Miami Heat", away: "Golden State Warriors", league: "NBA" },
+    { home: "LA Clippers", away: "Phoenix Suns", league: "NBA" },
+  ],
+  football: [
+    { home: "Kansas City Chiefs", away: "Buffalo Bills", league: "NFL" },
+    { home: "Philadelphia Eagles", away: "Dallas Cowboys", league: "NFL" },
+    { home: "Baltimore Ravens", away: "San Francisco 49ers", league: "NFL" },
+  ],
+  soccer: [
+    { home: "Manchester City", away: "Arsenal", league: "Premier League" },
+    { home: "Liverpool", away: "Real Madrid", league: "Champions League" },
+  ],
+};
+
+function WinProbabilityBar({ homeTeam, awayTeam, homeProb, awayProb }: {
+  homeTeam: string; awayTeam: string; homeProb: number; awayProb: number;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between text-xs font-medium text-muted-foreground">
+        <span className="truncate max-w-[45%]">{homeTeam}</span>
+        <span className="text-muted-foreground/60">vs</span>
+        <span className="truncate max-w-[45%] text-right">{awayTeam}</span>
+      </div>
+      <div className="relative h-4 bg-muted rounded-full overflow-hidden">
+        <div
+          className="absolute left-0 top-0 h-full bg-primary rounded-full transition-all duration-700"
+          style={{ width: `${homeProb * 100}%` }}
+        />
+        <div
+          className="absolute right-0 top-0 h-full bg-destructive/70 rounded-full transition-all duration-700"
+          style={{ width: `${awayProb * 100}%` }}
+        />
+      </div>
+      <div className="flex justify-between text-sm font-bold">
+        <span className="text-primary num">{(homeProb * 100).toFixed(1)}%</span>
+        <span className="text-destructive/70 num">{(awayProb * 100).toFixed(1)}%</span>
+      </div>
+    </div>
+  );
+}
+
+function ConfidenceBadge({ confidence }: { confidence: "low" | "medium" | "high" }) {
+  const config = {
+    low: { color: "text-red-400 bg-red-500/10 border-red-500/20", label: "Low Confidence" },
+    medium: { color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/20", label: "Medium Confidence" },
+    high: { color: "text-green-400 bg-green-500/10 border-green-500/20", label: "High Confidence" },
+  };
+  const { color, label } = config[confidence];
+  return (
+    <span className={cn("px-3 py-1 rounded-full text-xs font-bold border", color)}>
+      {confidence === "high" && <Flame className="inline w-3 h-3 mr-1" />}
+      {label}
+    </span>
+  );
+}
+
+function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (bet: any) => void }) {
+  const [betType, setBetType] = useState<"moneyline" | "spread" | "over_under">("moneyline");
+  const [selectedTeam, setSelectedTeam] = useState(
+    analysis.homeWinProbability > 0.5 ? analysis.homeTeam : analysis.awayTeam
+  );
+  const [stake, setStake] = useState(50);
+
+  const getOdds = () => {
+    if (betType === "moneyline") {
+      return selectedTeam === analysis.homeTeam ? analysis.homeMoneyline : analysis.awayMoneyline;
+    }
+    return -110; // Standard spread/OU odds
+  };
+
+  const calculatePayout = () => {
+    const odds = getOdds();
+    if (odds > 0) return stake + (stake * odds / 100);
+    return stake + (stake / (Math.abs(odds) / 100));
+  };
+
+  const getWinProb = () => {
+    if (betType === "moneyline") {
+      return selectedTeam === analysis.homeTeam ? analysis.homeWinProbability : analysis.awayWinProbability;
+    }
+    return 0.5; // Roughly 50/50 for spread/OU
+  };
+
+  const formatOdds = (odds: number) => odds > 0 ? `+${odds}` : `${odds}`;
+
+  return (
+    <div className="glass-card p-5 space-y-5">
+      {/* Win probability */}
+      <WinProbabilityBar
+        homeTeam={analysis.homeTeam}
+        awayTeam={analysis.awayTeam}
+        homeProb={analysis.homeWinProbability}
+        awayProb={analysis.awayWinProbability}
+      />
+
+      {/* Stats row */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-muted/50 rounded-xl p-3">
+          <p className="text-xs text-muted-foreground mb-1">Recommended Spread</p>
+          <p className="text-lg font-bold text-foreground">
+            {analysis.recommendedSpread > 0 ? "+" : ""}{analysis.recommendedSpread}
+          </p>
+          <p className="text-xs text-muted-foreground">{analysis.homeTeam}</p>
+        </div>
+        <div className="bg-muted/50 rounded-xl p-3">
+          <p className="text-xs text-muted-foreground mb-1">Over/Under</p>
+          <p className="text-lg font-bold text-foreground">{analysis.recommendedOverUnder}</p>
+          <p className="text-xs text-muted-foreground">Total points</p>
+        </div>
+      </div>
+
+      {/* Moneylines */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className={cn("p-3 rounded-xl border cursor-pointer transition-all", selectedTeam === analysis.homeTeam && betType === "moneyline" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30")}
+          onClick={() => { setBetType("moneyline"); setSelectedTeam(analysis.homeTeam); }}>
+          <p className="text-xs text-muted-foreground truncate">{analysis.homeTeam}</p>
+          <p className={cn("text-base font-bold num", analysis.homeMoneyline < 0 ? "text-green-400" : "text-foreground")}>
+            {formatOdds(analysis.homeMoneyline)}
+          </p>
+        </div>
+        <div className={cn("p-3 rounded-xl border cursor-pointer transition-all", selectedTeam === analysis.awayTeam && betType === "moneyline" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30")}
+          onClick={() => { setBetType("moneyline"); setSelectedTeam(analysis.awayTeam); }}>
+          <p className="text-xs text-muted-foreground truncate">{analysis.awayTeam}</p>
+          <p className={cn("text-base font-bold num", analysis.awayMoneyline < 0 ? "text-green-400" : "text-foreground")}>
+            {formatOdds(analysis.awayMoneyline)}
+          </p>
+        </div>
+      </div>
+
+      {/* Bet type selector */}
+      <div className="tab-bar">
+        {[
+          { key: "moneyline", label: "Moneyline" },
+          { key: "spread", label: "Spread" },
+          { key: "over_under", label: "Over/Under" },
+        ].map(({ key, label }) => (
+          <button key={key} className={cn("tab-item", betType === key && "active")}
+            onClick={() => setBetType(key as typeof betType)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Confidence & key factors */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <ConfidenceBadge confidence={analysis.confidence} />
+        </div>
+        <div className="space-y-1.5">
+          {analysis.keyFactors?.slice(0, 3).map((factor: string, i: number) => (
+            <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+              <CheckCircle2 className="w-3.5 h-3.5 text-green-400 flex-shrink-0 mt-0.5" />
+              {factor}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Analysis text */}
+      <div className="p-3 bg-muted/30 rounded-xl">
+        <p className="text-xs text-muted-foreground leading-relaxed">{analysis.analysis}</p>
+      </div>
+
+      {/* Stake input & bet button */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Stake:</span>
+          <div className="flex items-center gap-1">
+            {[10, 25, 50, 100, 250].map(amount => (
+              <button key={amount}
+                onClick={() => setStake(amount)}
+                className={cn("px-2.5 py-1 rounded-lg text-xs font-medium transition-all",
+                  stake === amount ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
+                )}>
+                ${amount}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-xl">
+          <div className="flex-1">
+            <p className="text-xs text-muted-foreground">Win {(getWinProb() * 100).toFixed(0)}% chance</p>
+            <p className="text-sm font-bold text-foreground">Potential: ${calculatePayout().toFixed(2)}</p>
+          </div>
+          <button
+            onClick={() => onPlaceBet({
+              gameId: analysis.gameId,
+              homeTeam: analysis.homeTeam,
+              awayTeam: analysis.awayTeam,
+              sport: analysis.sport,
+              betType,
+              selectedTeam: betType === "moneyline" ? selectedTeam : undefined,
+              amount: stake,
+              odds: getOdds(),
+              spread: betType === "spread" ? analysis.recommendedSpread : undefined,
+              overUnder: betType === "over_under" ? analysis.recommendedOverUnder : undefined,
+              winProbability: getWinProb(),
+            })}
+            className="btn-primary"
+          >
+            Place Bet
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccountCard({ account, onReset }: { account: any; onReset: () => void }) {
+  const profit = account?.totalProfit || 0;
+  const isUp = profit >= 0;
+
+  return (
+    <div className="glass-card p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-bold text-foreground">Mock Account</h3>
+        <button onClick={onReset} className="btn-ghost py-1 text-xs gap-1.5">
+          <RotateCcw className="w-3.5 h-3.5" />
+          Reset
+        </button>
+      </div>
+      <div className="mb-4">
+        <p className="text-xs text-muted-foreground mb-1">Balance</p>
+        <p className="text-3xl font-bold text-foreground num">${(account?.balance || 10000).toLocaleString("en-US", { minimumFractionDigits: 2 })}</p>
+        <p className={cn("text-sm font-semibold num mt-1", isUp ? "text-green-400" : "text-red-400")}>
+          {isUp ? "+" : ""}{profit.toFixed(2)} ({account?.roi?.toFixed(1) || "0.0"}% ROI)
+        </p>
+      </div>
+      <div className="grid grid-cols-4 gap-2">
+        {[
+          { label: "Bets", value: account?.totalBets || 0 },
+          { label: "Won", value: account?.wonBets || 0, color: "text-green-400" },
+          { label: "Lost", value: account?.lostBets || 0, color: "text-red-400" },
+          { label: "Win %", value: `${((account?.winRate || 0) * 100).toFixed(0)}%` },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="bg-muted/50 rounded-xl p-2.5 text-center">
+            <p className={cn("text-sm font-bold num", color || "text-foreground")}>{value}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BetHistoryList({ bets }: { bets: any[] }) {
+  if (bets.length === 0) {
+    return (
+      <div className="glass-card p-6 text-center">
+        <Target className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+        <p className="text-sm text-muted-foreground">No bets placed yet</p>
+        <p className="text-xs text-muted-foreground/60 mt-1">Select a game and place your first mock bet</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {bets.slice(0, 10).map(bet => (
+        <div key={bet.id} className={cn(
+          "glass-card p-4 flex items-center justify-between gap-3",
+          bet.status === "won" && "border-green-500/20",
+          bet.status === "lost" && "border-red-500/20",
+          bet.status === "pending" && "border-yellow-500/20"
+        )}>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              {bet.status === "won" && <CheckCircle2 className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />}
+              {bet.status === "lost" && <XCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
+              {bet.status === "pending" && <Clock className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />}
+              {bet.status === "cancelled" && <XCircle className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />}
+              <span className="text-xs font-medium text-foreground truncate">
+                {bet.homeTeam} vs {bet.awayTeam}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {bet.betType.replace("_", "/")} · ${bet.amount}
+              {bet.selectedTeam && ` · ${bet.selectedTeam}`}
+            </p>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <p className={cn("text-sm font-bold num",
+              bet.status === "won" ? "text-green-400" :
+              bet.status === "lost" ? "text-red-400" :
+              "text-muted-foreground"
+            )}>
+              {bet.status === "won" ? `+$${(bet.potentialPayout - bet.amount).toFixed(2)}` :
+               bet.status === "lost" ? `-$${bet.amount.toFixed(2)}` :
+               `$${bet.potentialPayout.toFixed(2)}`}
+            </p>
+            <p className={cn("text-xs font-medium capitalize",
+              bet.status === "won" ? "text-green-400/70" :
+              bet.status === "lost" ? "text-red-400/70" :
+              bet.status === "pending" ? "text-yellow-400/70" :
+              "text-muted-foreground"
+            )}>
+              {bet.status}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function BettingApp() {
+  const [selectedSport, setSelectedSport] = useState("basketball");
+  const [selectedGame, setSelectedGame] = useState<{ home: string; away: string; league: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<"analyze" | "mybets">("analyze");
+  const qc = useQueryClient();
+
+  const { data: analysis, isLoading: analyzing } = useQuery({
+    queryKey: ["/api/betting/analyze", selectedGame?.home, selectedGame?.away],
+    queryFn: async () => {
+      if (!selectedGame) return null;
+      const res = await fetch("/api/betting/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ homeTeam: selectedGame.home, awayTeam: selectedGame.away, sport: selectedSport }),
+      });
+      return res.json();
+    },
+    enabled: !!selectedGame,
+  });
+
+  const { data: account } = useQuery({
+    queryKey: ["/api/betting/account/default"],
+    queryFn: async () => {
+      const res = await fetch("/api/betting/account/default");
+      return res.json();
+    },
+    refetchInterval: 5000,
+  });
+
+  const { data: bets } = useQuery({
+    queryKey: ["/api/betting/bets/default"],
+    queryFn: async () => {
+      const res = await fetch("/api/betting/bets/default");
+      return res.json();
+    },
+    refetchInterval: 3000,
+  });
+
+  const { data: trending } = useQuery({
+    queryKey: ["/api/betting/trending"],
+    queryFn: async () => {
+      const res = await fetch("/api/betting/trending");
+      return res.json();
+    },
+  });
+
+  const placeBetMutation = useMutation({
+    mutationFn: async (betData: any) => {
+      const res = await fetch("/api/betting/bets/default", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(betData),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/betting/account/default"] });
+      qc.invalidateQueries({ queryKey: ["/api/betting/bets/default"] });
+      setActiveTab("mybets");
+    },
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/betting/account/default/reset", { method: "POST" });
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/betting/account/default"] });
+      qc.invalidateQueries({ queryKey: ["/api/betting/bets/default"] });
+    },
+  });
+
+  return (
+    <div className="animate-fade-in max-w-4xl">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-6">
+        <Link href="/apps">
+          <a className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronLeft className="w-4 h-4" />
+          </a>
+        </Link>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Sports Betting</h1>
+          <p className="text-sm text-muted-foreground">AI-powered analysis & mock betting</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Left: Account + controls */}
+        <div className="space-y-4">
+          <AccountCard account={account} onReset={() => resetMutation.mutate()} />
+
+          {/* Sport selector */}
+          <div className="glass-card p-4 space-y-3">
+            <h3 className="font-semibold text-sm text-foreground">Select Game</h3>
+            <div className="tab-bar">
+              {SPORTS.map(sport => (
+                <button key={sport} className={cn("tab-item text-xs", selectedSport === sport && "active")}
+                  onClick={() => { setSelectedSport(sport); setSelectedGame(null); }}>
+                  {sport.charAt(0).toUpperCase() + sport.slice(1)}
+                </button>
+              ))}
+            </div>
+            <div className="space-y-2">
+              {(SPORT_GAMES[selectedSport] || []).map(game => (
+                <button
+                  key={`${game.home}-${game.away}`}
+                  onClick={() => setSelectedGame(game)}
+                  className={cn(
+                    "w-full text-left p-3 rounded-xl border transition-all",
+                    selectedGame?.home === game.home
+                      ? "bg-primary/15 border-primary/40 text-foreground"
+                      : "bg-muted/30 border-border hover:border-primary/30 text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <p className="text-xs font-semibold text-primary mb-1">{game.league}</p>
+                  <p className="text-xs font-medium">{game.away}</p>
+                  <p className="text-xs text-muted-foreground">@ {game.home}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Analysis + Bets */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Tabs */}
+          <div className="tab-bar">
+            <button className={cn("tab-item", activeTab === "analyze" && "active")}
+              onClick={() => setActiveTab("analyze")}>
+              <span className="flex items-center justify-center gap-1.5">
+                <BarChart2 className="w-4 h-4" />
+                Analysis
+              </span>
+            </button>
+            <button className={cn("tab-item", activeTab === "mybets" && "active")}
+              onClick={() => setActiveTab("mybets")}>
+              <span className="flex items-center justify-center gap-1.5">
+                <Trophy className="w-4 h-4" />
+                My Bets
+                {bets && bets.filter((b: any) => b.status === "pending").length > 0 && (
+                  <span className="bg-yellow-500/20 text-yellow-400 text-xs px-1.5 rounded-full">
+                    {bets.filter((b: any) => b.status === "pending").length}
+                  </span>
+                )}
+              </span>
+            </button>
+          </div>
+
+          {activeTab === "analyze" && (
+            <>
+              {!selectedGame ? (
+                <div className="glass-card p-8 text-center space-y-3">
+                  <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+                    <Target className="w-7 h-7 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-foreground">Select a Game</h3>
+                    <p className="text-sm text-muted-foreground mt-1">Choose a matchup from the left to see win probabilities, spread recommendations, and place mock bets.</p>
+                  </div>
+                  {/* Trending bets */}
+                  {trending && trending.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                        <Flame className="w-3.5 h-3.5 text-orange-400" />
+                        Trending Bets
+                      </p>
+                      {trending.slice(0, 3).map((t: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between p-2.5 bg-muted/30 rounded-xl">
+                          <div className="text-left">
+                            <p className="text-xs font-medium text-foreground truncate max-w-[200px]">{t.betType}</p>
+                            <p className="text-xs text-muted-foreground truncate max-w-[200px]">{t.game}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-primary font-bold">{t.popularity}% pop</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : analyzing ? (
+                <div className="glass-card p-8 text-center">
+                  <div className="w-12 h-12 rounded-full border-2 border-primary/30 border-t-primary animate-spin mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">Analyzing matchup...</p>
+                </div>
+              ) : analysis ? (
+                <AnalysisPanel
+                  analysis={analysis}
+                  onPlaceBet={(bet) => placeBetMutation.mutate(bet)}
+                />
+              ) : null}
+              {placeBetMutation.isError && (
+                <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-xl text-destructive text-sm">
+                  <AlertCircle className="w-4 h-4" />
+                  {(placeBetMutation.error as Error)?.message || "Failed to place bet"}
+                </div>
+              )}
+              {placeBetMutation.isSuccess && (
+                <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-xl text-green-400 text-sm animate-fade-in">
+                  <CheckCircle2 className="w-4 h-4" />
+                  Bet placed! Results will be available shortly.
+                </div>
+              )}
+            </>
+          )}
+
+          {activeTab === "mybets" && (
+            <BetHistoryList bets={bets || []} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
