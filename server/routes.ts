@@ -242,12 +242,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const query = (req.query.q as string) || "";
       const sport = (req.query.sport as string) || "basketball";
       const ql = query.trim().toLowerCase();
-      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 60);
-      const fromEspn = espnLeaders.map((p) => fantasyService.playerStatsToFantasy(p));
-      const merged = fantasyService.mergeFantasyWithEspn(sport, fromEspn);
       if (!ql) {
         return res.json([]);
       }
+      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 60).catch(() => []);
+      const fromEspn = espnLeaders.map((p) => fantasyService.playerStatsToFantasy(p));
+      const merged = fantasyService.mergeFantasyWithEspn(sport, fromEspn);
       const filtered = merged.filter(
         (p) =>
           p.name.toLowerCase().includes(ql) ||
@@ -265,7 +265,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sport = req.query.sport as string || "basketball";
       const position = req.query.position as string | undefined;
       const limit = parseInt(req.query.limit as string) || 20;
-      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 40);
+      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 40).catch(() => []);
       const fromEspn = espnLeaders.map((p) => fantasyService.playerStatsToFantasy(p));
       const merged = fantasyService.mergeFantasyWithEspn(sport, fromEspn);
       let list = merged;
@@ -440,12 +440,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const query = (req.query.q as string) || "";
       const sport = (req.query.sport as string) || "basketball";
-      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 80);
-      const merged = analystService.mergePlayerSources(espnLeaders, sport);
       const ql = query.trim().toLowerCase();
       if (!ql) {
-        return res.json([]);
+        const merged = analystService.mergePlayerSources([], sport);
+        return res.json(merged.slice(0, 30));
       }
+      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 80).catch(() => []);
+      const merged = analystService.mergePlayerSources(espnLeaders, sport);
       const filtered = merged.filter(
         (p) =>
           p.name.toLowerCase().includes(ql) ||
@@ -498,7 +499,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/analyst/leaders", async (req, res) => {
     try {
       const sport = req.query.sport as string || "basketball";
-      const fromEspn = await espnSportsData.getLeaderPlayers(sport as SportId, 30);
+      const fromEspn = await espnSportsData.getLeaderPlayers(sport as SportId, 30).catch(() => []);
       if (fromEspn.length > 0) {
         const rows = fromEspn.slice(0, 12).map((p) => {
           const entries = Object.entries(p.stats);

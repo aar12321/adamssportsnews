@@ -372,7 +372,7 @@ export default function AnalystApp() {
       if (!res.ok) throw new Error(data.error || "Search failed");
       return data;
     },
-    enabled: activeTab === "players" && debouncedSearch.trim().length > 0,
+    enabled: activeTab === "players",
     staleTime: 60_000,
   });
 
@@ -547,9 +547,11 @@ export default function AnalystApp() {
                   <p className="text-xs text-muted-foreground/80">Try another spelling or switch league above.</p>
                 </div>
               )}
-              {activeTab === "players" && debouncedSearch.trim().length === 0 && (
-                <div className="glass-card p-6 text-center border-dashed border border-border/80">
-                  <p className="text-sm text-muted-foreground">Type at least one character to search ESPN leader data + our cache.</p>
+              {loadingPlayers && (
+                <div className="space-y-3">
+                  {[...Array(4)].map((_, i) => (
+                    <div key={i} className="glass-card p-4 animate-pulse h-24" />
+                  ))}
                 </div>
               )}
             </div>
