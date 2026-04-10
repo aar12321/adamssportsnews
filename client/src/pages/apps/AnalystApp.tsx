@@ -1,6 +1,7 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { APP_SPORTS } from "@shared/appSports";
+import { APP_SPORTS, getUserAppSports } from "@shared/appSports";
+import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   BarChart3, ChevronLeft, Search, TrendingUp, Users, ArrowLeftRight,
@@ -47,17 +48,9 @@ function TeamCard({ team, onClick, isSelected }: { team: any; onClick: () => voi
           <p className="font-bold text-foreground">{team.name}</p>
           <p className="text-xs text-muted-foreground">{team.league}</p>
         </div>
-        <div className="flex items-center gap-1.5">
-          {team.streak?.startsWith("W") && (
-            <span className="flex items-center gap-0.5 text-xs font-bold text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">
-              <Flame className="w-3 h-3" />
-              {team.streak}
-            </span>
-          )}
-          <span className="text-xs font-bold text-foreground">{team.record}</span>
-        </div>
+        <span className="text-xs font-bold text-foreground">{team.record}</span>
       </div>
-      <div className="grid grid-cols-3 gap-2 mb-3">
+      <div className="grid grid-cols-3 gap-2">
         <div className="text-center">
           <p className="text-base font-bold text-foreground num">{team.pointsPerGame?.toFixed(1)}</p>
           <p className="text-xs text-muted-foreground">{forLabel}</p>
@@ -73,7 +66,6 @@ function TeamCard({ team, onClick, isSelected }: { team: any; onClick: () => voi
           <p className="text-xs text-muted-foreground">DIFF</p>
         </div>
       </div>
-      <FormBadges form={team.recentForm || []} />
     </button>
   );
 }
@@ -115,11 +107,6 @@ function TeamDetail({ team }: { team: any }) {
               {team.streak}
             </p>
           </div>
-        </div>
-
-        <div className="mb-3">
-          <p className="text-xs text-muted-foreground mb-2">Recent Form</p>
-          <FormBadges form={team.recentForm || []} />
         </div>
 
         {team.injuries?.length > 0 && (
@@ -444,12 +431,20 @@ function PlayerDetail({ player }: { player: any }) {
 }
 
 export default function AnalystApp() {
-  const [selectedSport, setSelectedSport] = useState("basketball");
-  const [activeTab, setActiveTab] = useState<"teams" | "compare" | "players" | "leaders">("teams");
+  const { preferences } = useUserPreferences();
+  const userSports = useMemo(() => getUserAppSports(preferences.favoriteSports), [preferences.favoriteSports]);
+  const [selectedSport, setSelectedSport] = useState(userSports[0]?.id || "basketball");
+  const [activeTab, setActiveTab] = useState<"teams" | "compare" | "players">("teams");
   const [selectedTeam, setSelectedTeam] = useState<any>(null);
   const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
+
+  useEffect(() => {
+    if (!userSports.some(s => s.id === selectedSport)) {
+      setSelectedSport(userSports[0]?.id || "basketball");
+    }
+  }, [userSports, selectedSport]);
 
   const {
     data: teams,
@@ -480,14 +475,6 @@ export default function AnalystApp() {
     staleTime: 60_000,
   });
 
-  const { data: trending } = useQuery({
-    queryKey: ["/api/analyst/teams/trending", selectedSport],
-    queryFn: async () => {
-      const res = await fetch(`/api/analyst/teams/trending?sport=${selectedSport}`);
-      return res.json();
-    },
-    staleTime: 120_000,
-  });
 
   const filteredTeams = useMemo(() => {
     return teams?.filter((t: any) =>
@@ -520,7 +507,7 @@ export default function AnalystApp() {
     setSelectedPlayer(null);
   }, []);
 
-  const handleSportChange = useCallback((sportId: string) => {
+  const handleSportChange = useCallback((sportId: import("@shared/schema").SportId) => {
     setSelectedSport(sportId);
     setSelectedTeam(null);
     setSelectedPlayer(null);
@@ -546,7 +533,7 @@ export default function AnalystApp() {
 
       {/* Sport selector */}
       <div className="tab-bar mb-5">
-        {APP_SPORTS.map((s) => (
+        {userSports.map((s) => (
           <button key={s.id} className={cn("tab-item", selectedSport === s.id && "active")}
             onClick={() => handleSportChange(s.id)}>
             {s.label}
@@ -563,7 +550,6 @@ export default function AnalystApp() {
               { key: "teams", label: "Teams", Icon: Trophy },
               { key: "compare", label: "Compare", Icon: ArrowLeftRight },
               { key: "players", label: "Players", Icon: Users },
-              { key: "leaders", label: "Leaders", Icon: Award },
             ].map(({ key, label, Icon }) => (
               <button
                 key={key}
@@ -600,28 +586,6 @@ export default function AnalystApp() {
               <button type="button" className="font-semibold underline" onClick={() => refetchTeams()}>
                 Retry
               </button>
-            </div>
-          )}
-
-          {/* Trending teams */}
-          {activeTab === "teams" && trending && trending.length > 0 && (
-            <div className="glass-card p-4">
-              <p className="text-xs font-bold text-muted-foreground mb-2 flex items-center gap-1.5">
-                <Flame className="w-3.5 h-3.5 text-orange-400" />
-                HOT STREAKS
-              </p>
-              <div className="space-y-1.5">
-                {trending.slice(0, 3).map((t: any) => (
-                  <button
-                    key={t.id}
-                    onClick={() => handleSelectTeam(t)}
-                    className="w-full flex items-center justify-between p-2.5 bg-muted/30 hover:bg-muted/50 rounded-xl transition-all"
-                  >
-                    <span className="text-xs font-medium text-foreground">{t.name}</span>
-                    <span className="text-xs font-bold text-green-400">{t.streak}</span>
-                  </button>
-                ))}
-              </div>
             </div>
           )}
 
@@ -735,11 +699,6 @@ export default function AnalystApp() {
           {activeTab === "compare" && (
             <ComparisonView sport={selectedSport} />
           )}
-
-          {/* Leaders */}
-          {activeTab === "leaders" && (
-            <LeagueLeaders sport={selectedSport} />
-          )}
         </div>
 
         {/* Right: Detail panel */}
@@ -769,12 +728,11 @@ export default function AnalystApp() {
           ) : (
             <div className="space-y-4">
               {/* Summary stats */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 {[
-                  { label: "Teams Tracked", value: teams?.length || 0, icon: Trophy, color: "text-primary" },
-                  { label: "Hot Streaks", value: trending?.length || 0, icon: Flame, color: "text-orange-400" },
-                  { label: "Leaderboard rows", value: "ESPN + cache", icon: Users, color: "text-green-400" },
-                  { label: "Stats Categories", value: "Multi", icon: BarChart3, color: "text-purple-400" },
+                  { label: "Teams", value: teams?.length || 0, icon: Trophy, color: "text-primary" },
+                  { label: "League", value: APP_SPORTS.find(s => s.id === selectedSport)?.label || "—", icon: Users, color: "text-green-400" },
+                  { label: "Stat Categories", value: "Multi", icon: BarChart3, color: "text-purple-400" },
                 ].map(({ label, value, icon: Icon, color }) => (
                   <div key={label} className="glass-card p-4 text-center">
                     <Icon className={cn("w-5 h-5 mx-auto mb-1.5", color)} />

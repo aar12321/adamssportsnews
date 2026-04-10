@@ -3,20 +3,24 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { TrendingUp, Users, BarChart3, ArrowRight, DollarSign, Trophy, Target, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 
 function BettingSummary() {
+  const { user } = useAuth();
+  const userId = user?.id || "default";
   const { data: account } = useQuery({
-    queryKey: ["/api/betting/account/default"],
+    queryKey: ["betting-account", userId],
     queryFn: async () => {
-      const res = await fetch("/api/betting/account/default");
+      const res = await fetch(`/api/betting/account/${userId}`);
       return res.json();
     },
     staleTime: 30000,
   });
   const { data: bets } = useQuery({
-    queryKey: ["/api/betting/bets/default"],
+    queryKey: ["betting-bets", userId],
     queryFn: async () => {
-      const res = await fetch("/api/betting/bets/default");
+      const res = await fetch(`/api/betting/bets/${userId}`);
       return res.json();
     },
     staleTime: 30000,
@@ -64,19 +68,31 @@ function BettingSummary() {
 }
 
 function FantasySummary() {
-  const { data: team } = useQuery({
-    queryKey: ["/api/fantasy/team/sample?sport=basketball"],
-    queryFn: async () => {
-      const res = await fetch("/api/fantasy/team/sample?sport=basketball");
-      return res.json();
-    },
-    staleTime: 60000,
-  });
+  const { user } = useAuth();
+  const { preferences } = useUserPreferences();
+  const userId = user?.id || "default";
+  const primarySport = preferences.favoriteSports[0] || "basketball";
+
+  // Read local roster count across all sports
+  let totalPlayers = 0;
+  let sportsWithRoster = 0;
+  try {
+    const raw = localStorage.getItem(`fantasy_rosters_v2_${userId}`);
+    if (raw) {
+      const all = JSON.parse(raw);
+      Object.keys(all).forEach(s => {
+        if (Array.isArray(all[s]) && all[s].length > 0) {
+          totalPlayers += all[s].length;
+          sportsWithRoster += 1;
+        }
+      });
+    }
+  } catch {}
 
   const { data: injured } = useQuery({
-    queryKey: ["/api/fantasy/injured"],
+    queryKey: ["/api/fantasy/injured", primarySport],
     queryFn: async () => {
-      const res = await fetch("/api/fantasy/injured");
+      const res = await fetch(`/api/fantasy/injured?sport=${primarySport}`);
       return res.json();
     },
     staleTime: 300000,
@@ -94,19 +110,19 @@ function FantasySummary() {
             </div>
             <div>
               <p className="text-sm font-bold text-foreground">Fantasy</p>
-              <p className="text-xs text-muted-foreground">{team?.record || "8-4"}</p>
+              <p className="text-xs text-muted-foreground">My Teams</p>
             </div>
           </div>
           <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-muted/50 rounded-xl p-2.5">
-            <p className="text-xs text-muted-foreground">This Week</p>
-            <p className="text-sm font-bold text-foreground num">{team?.weeklyPoints?.toFixed(1) || "—"}</p>
+            <p className="text-xs text-muted-foreground">Players</p>
+            <p className="text-sm font-bold text-foreground num">{totalPlayers}</p>
           </div>
           <div className="bg-muted/50 rounded-xl p-2.5">
-            <p className="text-xs text-muted-foreground">Rank</p>
-            <p className="text-sm font-bold text-foreground">{team?.standing || "3rd"}</p>
+            <p className="text-xs text-muted-foreground">Sports</p>
+            <p className="text-sm font-bold text-foreground num">{sportsWithRoster}</p>
           </div>
         </div>
         {injuryAlerts.length > 0 && (
@@ -121,16 +137,24 @@ function FantasySummary() {
 }
 
 function AnalystSummary() {
-  const { data: trending } = useQuery({
-    queryKey: ["/api/analyst/teams/trending?sport=basketball"],
+  const { preferences } = useUserPreferences();
+  const primarySport = preferences.favoriteSports[0] || "basketball";
+
+  const { data: teams } = useQuery({
+    queryKey: ["/api/analyst/teams", primarySport],
     queryFn: async () => {
-      const res = await fetch("/api/analyst/teams/trending?sport=basketball");
+      const res = await fetch(`/api/analyst/teams?sport=${primarySport}`);
       return res.json();
     },
     staleTime: 300000,
   });
 
-  const topTeam = trending?.[0];
+  const teamCount = teams?.length || 0;
+  const sportLabel = primarySport === "basketball" ? "NBA" :
+                     primarySport === "football" ? "NFL" :
+                     primarySport === "soccer" ? "EPL" :
+                     primarySport === "baseball" ? "MLB" :
+                     primarySport === "hockey" ? "NHL" : "";
 
   return (
     <Link href="/apps/analyst">
@@ -142,35 +166,25 @@ function AnalystSummary() {
             </div>
             <div>
               <p className="text-sm font-bold text-foreground">The Analyst</p>
-              <p className="text-xs text-muted-foreground">Research Tool</p>
+              <p className="text-xs text-muted-foreground">{sportLabel} Research</p>
             </div>
           </div>
           <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
         </div>
-        {topTeam ? (
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Hottest Team</span>
-              <span className="text-xs text-green-400 font-bold">{topTeam.streak}</span>
-            </div>
-            <p className="text-sm font-semibold text-foreground">{topTeam.name}</p>
-            <div className="flex items-center gap-1">
-              {topTeam.recentForm?.slice(0, 5).map((r: string, i: number) => (
-                <span key={i} className={cn(
-                  "w-5 h-5 rounded text-[10px] font-bold flex items-center justify-center",
-                  r === "W" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
-                )}>
-                  {r}
-                </span>
-              ))}
-            </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-muted/50 rounded-xl p-2.5">
+            <p className="text-xs text-muted-foreground">Teams</p>
+            <p className="text-sm font-bold text-foreground num">{teamCount}</p>
           </div>
-        ) : (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Target className="w-4 h-4" />
-            <span className="text-xs">Research teams & players</span>
+          <div className="bg-muted/50 rounded-xl p-2.5">
+            <p className="text-xs text-muted-foreground">League</p>
+            <p className="text-sm font-bold text-foreground">{sportLabel}</p>
           </div>
-        )}
+        </div>
+        <div className="mt-2 flex items-center gap-2 text-muted-foreground">
+          <Target className="w-3 h-3" />
+          <span className="text-xs">Compare teams &amp; players</span>
+        </div>
       </a>
     </Link>
   );
@@ -180,14 +194,14 @@ export default function AppSummaries() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="font-bold text-foreground">My Apps</h2>
+        <h2 className="font-bold text-foreground text-lg">My Apps</h2>
         <Link href="/apps">
           <a className="text-xs text-primary font-medium hover:underline flex items-center gap-1">
             View all <ArrowRight className="w-3 h-3" />
           </a>
         </Link>
       </div>
-      <div className="space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <BettingSummary />
         <FantasySummary />
         <AnalystSummary />

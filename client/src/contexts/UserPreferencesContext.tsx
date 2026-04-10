@@ -48,6 +48,7 @@ interface UserPreferencesContextValue {
   updateDashboardLayout: (updates: Partial<UserPreferences["dashboardLayout"]>) => void;
   updateNotifications: (updates: Partial<UserPreferences["notifications"]>) => void;
   updateBettingPrefs: (updates: Partial<UserPreferences["betting"]>) => void;
+  bulkUpdate: (updater: (prev: UserPreferences) => UserPreferences) => void;
   resetPreferences: () => void;
   isLoading: boolean;
 }
@@ -140,6 +141,10 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
     }));
   }, []);
 
+  const bulkUpdate = useCallback((updater: (prev: UserPreferences) => UserPreferences) => {
+    setPreferences(updater);
+  }, []);
+
   const resetPreferences = useCallback(() => {
     setPreferences({ ...defaultPreferences, userId });
     try {
@@ -154,6 +159,7 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
       updateDashboardLayout,
       updateNotifications,
       updateBettingPrefs,
+      bulkUpdate,
       resetPreferences,
       isLoading,
     }}>
