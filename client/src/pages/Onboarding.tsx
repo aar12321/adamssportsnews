@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Trophy, ChevronRight, ChevronLeft, Check, Target, BarChart3,
-  Users, Zap, Star, ArrowRight
+  Users, Zap, Search, X, Settings
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,48 +16,48 @@ const SPORTS = [
   { key: "hockey" as SportId, label: "Hockey", league: "NHL", emoji: "\u{1F3D2}" },
 ];
 
-const POPULAR_TEAMS: Record<string, { name: string; short: string }[]> = {
+// Comprehensive teams list - all 30 NBA, 32 NFL, top EPL + European, all 30 MLB, all 32 NHL
+const ALL_TEAMS: Record<string, string[]> = {
   basketball: [
-    { name: "Boston Celtics", short: "BOS" },
-    { name: "Los Angeles Lakers", short: "LAL" },
-    { name: "Golden State Warriors", short: "GSW" },
-    { name: "Oklahoma City Thunder", short: "OKC" },
-    { name: "Denver Nuggets", short: "DEN" },
-    { name: "Cleveland Cavaliers", short: "CLE" },
-    { name: "Miami Heat", short: "MIA" },
-    { name: "New York Knicks", short: "NYK" },
+    "Atlanta Hawks", "Boston Celtics", "Brooklyn Nets", "Charlotte Hornets", "Chicago Bulls",
+    "Cleveland Cavaliers", "Dallas Mavericks", "Denver Nuggets", "Detroit Pistons", "Golden State Warriors",
+    "Houston Rockets", "Indiana Pacers", "LA Clippers", "Los Angeles Lakers", "Memphis Grizzlies",
+    "Miami Heat", "Milwaukee Bucks", "Minnesota Timberwolves", "New Orleans Pelicans", "New York Knicks",
+    "Oklahoma City Thunder", "Orlando Magic", "Philadelphia 76ers", "Phoenix Suns", "Portland Trail Blazers",
+    "Sacramento Kings", "San Antonio Spurs", "Toronto Raptors", "Utah Jazz", "Washington Wizards",
   ],
   football: [
-    { name: "Kansas City Chiefs", short: "KC" },
-    { name: "Philadelphia Eagles", short: "PHI" },
-    { name: "Buffalo Bills", short: "BUF" },
-    { name: "Dallas Cowboys", short: "DAL" },
-    { name: "San Francisco 49ers", short: "SF" },
-    { name: "Baltimore Ravens", short: "BAL" },
-    { name: "Detroit Lions", short: "DET" },
-    { name: "Green Bay Packers", short: "GB" },
+    "Arizona Cardinals", "Atlanta Falcons", "Baltimore Ravens", "Buffalo Bills", "Carolina Panthers",
+    "Chicago Bears", "Cincinnati Bengals", "Cleveland Browns", "Dallas Cowboys", "Denver Broncos",
+    "Detroit Lions", "Green Bay Packers", "Houston Texans", "Indianapolis Colts", "Jacksonville Jaguars",
+    "Kansas City Chiefs", "Las Vegas Raiders", "Los Angeles Chargers", "Los Angeles Rams", "Miami Dolphins",
+    "Minnesota Vikings", "New England Patriots", "New Orleans Saints", "New York Giants", "New York Jets",
+    "Philadelphia Eagles", "Pittsburgh Steelers", "San Francisco 49ers", "Seattle Seahawks", "Tampa Bay Buccaneers",
+    "Tennessee Titans", "Washington Commanders",
   ],
   soccer: [
-    { name: "Manchester City", short: "MCI" },
-    { name: "Arsenal", short: "ARS" },
-    { name: "Liverpool", short: "LIV" },
-    { name: "Real Madrid", short: "RMA" },
-    { name: "Barcelona", short: "BAR" },
-    { name: "Bayern Munich", short: "BAY" },
-    { name: "Chelsea", short: "CHE" },
-    { name: "PSG", short: "PSG" },
+    "Arsenal", "Aston Villa", "Brighton", "Chelsea", "Crystal Palace", "Everton", "Fulham", "Liverpool",
+    "Manchester City", "Manchester United", "Newcastle United", "Nottingham Forest", "Tottenham Hotspur",
+    "West Ham United", "Wolves", "Real Madrid", "Barcelona", "Atletico Madrid", "Bayern Munich",
+    "Borussia Dortmund", "Paris Saint-Germain", "Juventus", "Inter Milan", "AC Milan", "Napoli",
+    "Ajax", "Benfica", "Porto", "Celtic", "Rangers",
   ],
   baseball: [
-    { name: "New York Yankees", short: "NYY" },
-    { name: "Los Angeles Dodgers", short: "LAD" },
-    { name: "Atlanta Braves", short: "ATL" },
-    { name: "Houston Astros", short: "HOU" },
+    "Arizona Diamondbacks", "Atlanta Braves", "Baltimore Orioles", "Boston Red Sox", "Chicago Cubs",
+    "Chicago White Sox", "Cincinnati Reds", "Cleveland Guardians", "Colorado Rockies", "Detroit Tigers",
+    "Houston Astros", "Kansas City Royals", "Los Angeles Angels", "Los Angeles Dodgers", "Miami Marlins",
+    "Milwaukee Brewers", "Minnesota Twins", "New York Mets", "New York Yankees", "Oakland Athletics",
+    "Philadelphia Phillies", "Pittsburgh Pirates", "San Diego Padres", "San Francisco Giants", "Seattle Mariners",
+    "St. Louis Cardinals", "Tampa Bay Rays", "Texas Rangers", "Toronto Blue Jays", "Washington Nationals",
   ],
   hockey: [
-    { name: "Edmonton Oilers", short: "EDM" },
-    { name: "Florida Panthers", short: "FLA" },
-    { name: "New York Rangers", short: "NYR" },
-    { name: "Dallas Stars", short: "DAL" },
+    "Anaheim Ducks", "Boston Bruins", "Buffalo Sabres", "Calgary Flames", "Carolina Hurricanes",
+    "Chicago Blackhawks", "Colorado Avalanche", "Columbus Blue Jackets", "Dallas Stars", "Detroit Red Wings",
+    "Edmonton Oilers", "Florida Panthers", "Los Angeles Kings", "Minnesota Wild", "Montreal Canadiens",
+    "Nashville Predators", "New Jersey Devils", "New York Islanders", "New York Rangers", "Ottawa Senators",
+    "Philadelphia Flyers", "Pittsburgh Penguins", "San Jose Sharks", "Seattle Kraken", "St. Louis Blues",
+    "Tampa Bay Lightning", "Toronto Maple Leafs", "Utah Hockey Club", "Vancouver Canucks", "Vegas Golden Knights",
+    "Washington Capitals", "Winnipeg Jets",
   ],
 };
 
@@ -76,17 +76,39 @@ const EXPERIENCE_LEVELS = [
 
 export default function Onboarding() {
   const { user, setIsNewUser } = useAuth();
-  const { updatePreferences, updateBettingPrefs, updateDashboardLayout } = useUserPreferences();
+  const { bulkUpdate } = useUserPreferences();
   const [step, setStep] = useState(0);
   const [selectedSports, setSelectedSports] = useState<SportId[]>([]);
   const [selectedTeams, setSelectedTeams] = useState<string[]>([]);
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
   const [experience, setExperience] = useState<string>("");
+  const [teamSearch, setTeamSearch] = useState("");
+  const [completing, setCompleting] = useState(false);
   const [displayName, setDisplayName] = useState(
     user?.user_metadata?.display_name || user?.email?.split("@")[0] || "Sports Fan"
   );
 
   const totalSteps = 5;
+
+  // Search teams across all selected sports
+  const searchableTeams = useMemo(() => {
+    const teams: { name: string; sport: SportId; sportLabel: string }[] = [];
+    selectedSports.forEach(sport => {
+      const sportInfo = SPORTS.find(s => s.key === sport);
+      (ALL_TEAMS[sport] || []).forEach(teamName => {
+        teams.push({ name: teamName, sport, sportLabel: sportInfo?.league || "" });
+      });
+    });
+    return teams;
+  }, [selectedSports]);
+
+  const filteredSearchTeams = useMemo(() => {
+    const q = teamSearch.trim().toLowerCase();
+    if (!q) return [];
+    return searchableTeams
+      .filter(t => t.name.toLowerCase().includes(q))
+      .slice(0, 20);
+  }, [teamSearch, searchableTeams]);
 
   const toggleSport = (sport: SportId) => {
     setSelectedSports(prev =>
@@ -110,7 +132,7 @@ export default function Onboarding() {
     switch (step) {
       case 0: return displayName.trim().length > 0;
       case 1: return selectedSports.length > 0;
-      case 2: return true; // teams are optional
+      case 2: return true;
       case 3: return selectedInterests.length > 0;
       case 4: return experience !== "";
       default: return true;
@@ -118,32 +140,46 @@ export default function Onboarding() {
   };
 
   const handleComplete = () => {
-    // Save all preferences
-    updatePreferences({
+    if (completing) return;
+    setCompleting(true);
+
+    // Determine betting prefs from experience
+    const bettingPrefs =
+      experience === "beginner" || experience === "casual"
+        ? { riskLevel: "conservative" as const, defaultStake: 25 }
+        : experience === "serious"
+        ? { riskLevel: "moderate" as const, defaultStake: 50 }
+        : { riskLevel: "aggressive" as const, defaultStake: 100 };
+
+    // Single atomic update - no cascading state updates, no lag
+    bulkUpdate(prev => ({
+      ...prev,
       displayName,
       favoriteSports: selectedSports,
       favoriteTeams: selectedTeams,
-    });
+      dashboardLayout: {
+        ...prev.dashboardLayout,
+        scoresSports: selectedSports,
+      },
+      betting: {
+        ...prev.betting,
+        ...bettingPrefs,
+      },
+    }));
 
-    updateDashboardLayout({
-      scoresSports: selectedSports,
-    });
-
-    // Set risk level based on experience
-    if (experience === "beginner" || experience === "casual") {
-      updateBettingPrefs({ riskLevel: "conservative", defaultStake: 25 });
-    } else if (experience === "serious") {
-      updateBettingPrefs({ riskLevel: "moderate", defaultStake: 50 });
-    } else {
-      updateBettingPrefs({ riskLevel: "aggressive", defaultStake: 100 });
-    }
-
-    localStorage.setItem("onboarding_complete", "true");
+    // Persist completion flag and exit onboarding immediately
+    try {
+      localStorage.setItem(`onboarding_complete_${user?.id || "default"}`, "true");
+      localStorage.setItem("onboarding_complete", "true");
+    } catch {}
     setIsNewUser(false);
   };
 
   const handleSkip = () => {
-    localStorage.setItem("onboarding_complete", "true");
+    try {
+      localStorage.setItem(`onboarding_complete_${user?.id || "default"}`, "true");
+      localStorage.setItem("onboarding_complete", "true");
+    } catch {}
     setIsNewUser(false);
   };
 
@@ -178,7 +214,7 @@ export default function Onboarding() {
               </div>
               <h2 className="text-2xl font-bold text-foreground">Welcome to Adams Sports</h2>
               <p className="text-sm text-muted-foreground mt-2">
-                Let's personalize your experience. This takes about 30 seconds.
+                Let's personalize your experience. You can change any of this later in your Profile.
               </p>
             </div>
 
@@ -193,6 +229,12 @@ export default function Onboarding() {
                   className="w-full h-11 px-4 bg-input border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-all"
                 />
               </div>
+              <div className="flex items-start gap-2 p-3 bg-muted/30 rounded-xl">
+                <Settings className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-muted-foreground">
+                  Everything you set up here is editable anytime from your <span className="font-semibold text-foreground">Profile</span> page.
+                </p>
+              </div>
             </div>
           </div>
         )}
@@ -202,7 +244,7 @@ export default function Onboarding() {
           <div className="animate-fade-in space-y-6">
             <div className="text-center">
               <h2 className="text-xl font-bold text-foreground">Which sports do you follow?</h2>
-              <p className="text-sm text-muted-foreground mt-1">Select at least one to customize your feed</p>
+              <p className="text-sm text-muted-foreground mt-1">Only selected sports will appear across the platform</p>
             </div>
 
             <div className="space-y-2">
@@ -236,41 +278,92 @@ export default function Onboarding() {
           <div className="animate-fade-in space-y-6">
             <div className="text-center">
               <h2 className="text-xl font-bold text-foreground">Pick your favorite teams</h2>
-              <p className="text-sm text-muted-foreground mt-1">Optional - you can change these later</p>
+              <p className="text-sm text-muted-foreground mt-1">Search any team or skip this step</p>
             </div>
 
-            <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
-              {selectedSports.map(sport => {
-                const sportInfo = SPORTS.find(s => s.key === sport);
-                const teams = POPULAR_TEAMS[sport] || [];
-                return (
-                  <div key={sport}>
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                      {sportInfo?.emoji} {sportInfo?.label}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {teams.map(team => (
-                        <button
-                          key={team.name}
-                          onClick={() => toggleTeam(team.name)}
-                          className={cn(
-                            "px-3 py-2 rounded-xl text-xs font-medium border transition-all",
-                            selectedTeams.includes(team.name)
-                              ? "bg-primary/15 border-primary/40 text-foreground"
-                              : "bg-muted/30 border-border text-muted-foreground hover:text-foreground"
-                          )}
-                        >
-                          {team.short}
-                          {selectedTeams.includes(team.name) && (
-                            <Check className="inline w-3 h-3 ml-1" />
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+            {/* Search bar */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                value={teamSearch}
+                onChange={e => setTeamSearch(e.target.value)}
+                placeholder="Search by team name..."
+                className="w-full h-11 pl-10 pr-10 bg-input border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-all"
+              />
+              {teamSearch && (
+                <button
+                  onClick={() => setTeamSearch("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
+
+            {/* Search results */}
+            {teamSearch && (
+              <div className="space-y-1 max-h-64 overflow-y-auto">
+                {filteredSearchTeams.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-4">
+                    No teams match "{teamSearch}"
+                  </p>
+                ) : (
+                  filteredSearchTeams.map(team => {
+                    const isSelected = selectedTeams.includes(team.name);
+                    return (
+                      <button
+                        key={team.name}
+                        onClick={() => toggleTeam(team.name)}
+                        className={cn(
+                          "w-full flex items-center justify-between p-3 rounded-xl border transition-all text-left",
+                          isSelected
+                            ? "bg-primary/15 border-primary/40"
+                            : "bg-card border-border hover:border-primary/30"
+                        )}
+                      >
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{team.name}</p>
+                          <p className="text-xs text-muted-foreground">{team.sportLabel}</p>
+                        </div>
+                        {isSelected && <Check className="w-4 h-4 text-primary" />}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+
+            {/* Selected teams chips */}
+            {selectedTeams.length > 0 && !teamSearch && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Selected ({selectedTeams.length})
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {selectedTeams.map(team => (
+                    <span
+                      key={team}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/15 border border-primary/40 rounded-xl text-xs font-medium text-foreground"
+                    >
+                      {team}
+                      <button
+                        onClick={() => toggleTeam(team)}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {selectedTeams.length === 0 && !teamSearch && (
+              <p className="text-xs text-muted-foreground text-center py-6">
+                Type a team name above to add it to your favorites
+              </p>
+            )}
           </div>
         )}
 
@@ -345,10 +438,10 @@ export default function Onboarding() {
         <div className="flex items-center justify-between mt-8">
           <button
             onClick={() => setStep(s => s - 1)}
-            disabled={step === 0}
+            disabled={step === 0 || completing}
             className={cn(
               "flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-medium transition-all",
-              step === 0
+              step === 0 || completing
                 ? "text-muted-foreground/50 cursor-not-allowed"
                 : "text-muted-foreground hover:text-foreground"
             )}
@@ -374,16 +467,16 @@ export default function Onboarding() {
           ) : (
             <button
               onClick={handleComplete}
-              disabled={!canProceed()}
+              disabled={!canProceed() || completing}
               className={cn(
                 "flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all",
-                canProceed()
+                canProceed() && !completing
                   ? "bg-primary text-primary-foreground hover:bg-primary/90"
                   : "bg-muted text-muted-foreground cursor-not-allowed"
               )}
             >
               <Zap className="w-4 h-4" />
-              Get Started
+              {completing ? "Setting up..." : "Get Started"}
             </button>
           )}
         </div>

@@ -17,13 +17,13 @@ export default function Dashboard() {
   return (
     <div className="animate-fade-in">
       {/* Header */}
-      <div className="mb-6">
+      <div className="mb-8">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">
+            <h1 className="text-3xl font-bold text-foreground">
               Welcome back, <span className="gradient-text">{preferences.displayName}</span>
             </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-sm text-muted-foreground mt-1">
               {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
             </p>
           </div>
@@ -59,26 +59,31 @@ export default function Dashboard() {
           {activeTab === "apps" && <AppSummaries />}
         </div>
       ) : (
-        <div className="grid grid-cols-12 gap-6">
-          {dashboardLayout.showLiveScores && (
-            <div className="col-span-4">
-              <LiveScoresWidget sports={dashboardLayout.scoresSports} />
-            </div>
-          )}
-          {dashboardLayout.showNewsFeed && (
-            <div className={cn(
-              dashboardLayout.showLiveScores && dashboardLayout.showAppSummaries ? "col-span-5" :
-              (dashboardLayout.showLiveScores || dashboardLayout.showAppSummaries) ? "col-span-8" :
-              "col-span-12"
-            )}>
-              <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} />
-            </div>
-          )}
+        <div className="space-y-6">
+          {/* Top row: Apps hub (compact, full width) */}
           {dashboardLayout.showAppSummaries && (
-            <div className="col-span-3">
+            <div>
               <AppSummaries />
             </div>
           )}
+
+          {/* Main content: Live Scores + News side by side with breathing room */}
+          <div className="grid grid-cols-12 gap-6">
+            {dashboardLayout.showLiveScores && (
+              <div className={cn(
+                dashboardLayout.showNewsFeed ? "col-span-5 xl:col-span-4" : "col-span-12"
+              )}>
+                <LiveScoresWidget sports={dashboardLayout.scoresSports} />
+              </div>
+            )}
+            {dashboardLayout.showNewsFeed && (
+              <div className={cn(
+                dashboardLayout.showLiveScores ? "col-span-7 xl:col-span-8" : "col-span-12"
+              )}>
+                <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

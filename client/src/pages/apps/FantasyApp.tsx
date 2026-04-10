@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
-import { APP_SPORTS } from "@shared/appSports";
+import { APP_SPORTS, getUserAppSports } from "@shared/appSports";
+import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
@@ -14,31 +15,51 @@ import { useAuth } from "@/contexts/AuthContext";
 
 const MAX_ROSTER = 15;
 
+// Stores rosters as a nested map: { [sport]: player[] } keyed by user
 function useLocalRoster(userId: string, sport: string) {
-  const key = `fantasy_roster_${userId}_${sport}`;
-  const [roster, setRoster] = useState<any[]>(() => {
-    try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch { return []; }
-  });
+  const storageKey = `fantasy_rosters_v2_${userId}`;
 
-  useEffect(() => {
-    try { localStorage.setItem(key, JSON.stringify(roster)); } catch {}
-  }, [roster, key]);
+  const readAll = (): Record<string, any[]> => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return typeof parsed === "object" && parsed !== null ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
 
+  const [allRosters, setAllRosters] = useState<Record<string, any[]>>(() => readAll());
+
+  // Re-read when user changes
   useEffect(() => {
-    try { setRoster(JSON.parse(localStorage.getItem(key) || "[]")); } catch { setRoster([]); }
-  }, [key]);
+    setAllRosters(readAll());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
+
+  // Persist whenever allRosters changes
+  useEffect(() => {
+    try { localStorage.setItem(storageKey, JSON.stringify(allRosters)); } catch {}
+  }, [allRosters, storageKey]);
+
+  const roster = allRosters[sport] || [];
 
   const addPlayer = useCallback((player: any) => {
-    setRoster(prev => {
-      if (prev.length >= MAX_ROSTER) return prev;
-      if (prev.some(p => p.id === player.id)) return prev;
-      return [...prev, player];
+    setAllRosters(prev => {
+      const current = prev[sport] || [];
+      if (current.length >= MAX_ROSTER) return prev;
+      if (current.some(p => p.id === player.id)) return prev;
+      return { ...prev, [sport]: [...current, player] };
     });
-  }, []);
+  }, [sport]);
 
   const removePlayer = useCallback((playerId: string) => {
-    setRoster(prev => prev.filter(p => p.id !== playerId));
-  }, []);
+    setAllRosters(prev => {
+      const current = prev[sport] || [];
+      return { ...prev, [sport]: current.filter(p => p.id !== playerId) };
+    });
+  }, [sport]);
 
   const isOnRoster = useCallback((playerId: string) => {
     return roster.some(p => p.id === playerId);
@@ -46,6 +67,88 @@ function useLocalRoster(userId: string, sport: string) {
 
   return { roster, addPlayer, removePlayer, isOnRoster };
 }
+
+// Sport-specific roster positions and configurations
+const SPORT_CONFIG: Record<string, {
+  positions: string[];
+  statCategories: { key: string; label: string }[];
+  description: string;
+  scoringFormat: string;
+}> = {
+  basketball: {
+    positions: ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL", "BN"],
+    statCategories: [
+      { key: "PTS", label: "Points" },
+      { key: "REB", label: "Rebounds" },
+      { key: "AST", label: "Assists" },
+      { key: "STL", label: "Steals" },
+      { key: "BLK", label: "Blocks" },
+      { key: "FG%", label: "FG%" },
+      { key: "FT%", label: "FT%" },
+      { key: "3PM", label: "3PM" },
+    ],
+    description: "Head-to-head · 9-category NBA league",
+    scoringFormat: "9-Cat",
+  },
+  football: {
+    positions: ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DEF", "BN"],
+    statCategories: [
+      { key: "PaYd", label: "Pass Yds" },
+      { key: "PaTD", label: "Pass TD" },
+      { key: "RuYd", label: "Rush Yds" },
+      { key: "RuTD", label: "Rush TD" },
+      { key: "Rec", label: "Receptions" },
+      { key: "ReYd", label: "Rec Yds" },
+      { key: "ReTD", label: "Rec TD" },
+      { key: "INT", label: "INT" },
+    ],
+    description: "Standard PPR · Weekly head-to-head",
+    scoringFormat: "PPR",
+  },
+  soccer: {
+    positions: ["GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "FWD", "FWD", "BN"],
+    statCategories: [
+      { key: "G", label: "Goals" },
+      { key: "A", label: "Assists" },
+      { key: "CS", label: "Clean Sheets" },
+      { key: "YC", label: "Yellow Cards" },
+      { key: "RC", label: "Red Cards" },
+      { key: "Min", label: "Minutes" },
+    ],
+    description: "FPL-style · Gameweek scoring",
+    scoringFormat: "FPL",
+  },
+  baseball: {
+    positions: ["C", "1B", "2B", "3B", "SS", "OF", "OF", "OF", "SP", "RP", "BN"],
+    statCategories: [
+      { key: "AVG", label: "Batting Avg" },
+      { key: "HR", label: "Home Runs" },
+      { key: "RBI", label: "RBI" },
+      { key: "R", label: "Runs" },
+      { key: "SB", label: "Stolen Bases" },
+      { key: "ERA", label: "ERA" },
+      { key: "WHIP", label: "WHIP" },
+      { key: "K", label: "Strikeouts" },
+    ],
+    description: "Rotisserie · Season-long",
+    scoringFormat: "Roto",
+  },
+  hockey: {
+    positions: ["C", "C", "LW", "LW", "RW", "RW", "D", "D", "G", "BN"],
+    statCategories: [
+      { key: "G", label: "Goals" },
+      { key: "A", label: "Assists" },
+      { key: "P", label: "Points" },
+      { key: "+/-", label: "Plus/Minus" },
+      { key: "PPP", label: "PP Points" },
+      { key: "SOG", label: "Shots" },
+      { key: "W", label: "Wins (G)" },
+      { key: "SV%", label: "Save %" },
+    ],
+    description: "Head-to-head · Multi-category",
+    scoringFormat: "H2H",
+  },
+};
 
 const STATUS_CONFIG = {
   active: { label: "Active", className: "text-green-400 bg-green-500/10" },
@@ -326,13 +429,21 @@ function TradeAnalyzer({ sportKey }: { sportKey: string }) {
 
 export default function FantasyApp() {
   const { user } = useAuth();
+  const { preferences } = useUserPreferences();
   const userId = user?.id || "default";
-  const [selectedSport, setSelectedSport] = useState("basketball");
+  const userSports = useMemo(() => getUserAppSports(preferences.favoriteSports), [preferences.favoriteSports]);
+  const [selectedSport, setSelectedSport] = useState(userSports[0]?.id || "basketball");
   const [activeTab, setActiveTab] = useState<"roster" | "players" | "waiver" | "injuries" | "trade">("roster");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const { roster, addPlayer, removePlayer, isOnRoster } = useLocalRoster(userId, selectedSport);
+
+  useEffect(() => {
+    if (!userSports.some(s => s.id === selectedSport)) {
+      setSelectedSport(userSports[0]?.id || "basketball");
+    }
+  }, [userSports, selectedSport]);
 
   const { data: team } = useQuery({
     queryKey: ["/api/fantasy/team/sample", selectedSport],
@@ -410,13 +521,15 @@ export default function FantasyApp() {
           <h1 className="text-2xl font-bold tracking-tight">
             <span className="gradient-text">Fantasy Teams</span>
           </h1>
-          <p className="text-sm text-muted-foreground">ESPN-powered boards · trades · injuries · waiver targets</p>
+          <p className="text-sm text-muted-foreground">
+            {SPORT_CONFIG[selectedSport]?.description || "Build a team, track players, analyze trades"}
+          </p>
         </div>
       </div>
 
       {/* Sport selector */}
       <div className="tab-bar mb-5">
-        {APP_SPORTS.map((s) => (
+        {userSports.map((s) => (
           <button key={s.id} className={cn("tab-item", selectedSport === s.id && "active")}
             onClick={() => setSelectedSport(s.id)}>
             {s.label}
@@ -509,7 +622,54 @@ export default function FantasyApp() {
 
           {/* Roster */}
           {activeTab === "roster" && (
-            <div className="space-y-2">
+            <div className="space-y-3">
+              {/* Sport-specific lineup/positions display */}
+              {roster.length > 0 && SPORT_CONFIG[selectedSport] && (
+                <div className="glass-card p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Starting Lineup</p>
+                      <p className="text-xs text-muted-foreground/70 mt-0.5">{SPORT_CONFIG[selectedSport].scoringFormat} · {SPORT_CONFIG[selectedSport].positions.length} slots</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SPORT_CONFIG[selectedSport].positions.map((pos, i) => {
+                      // Try to find a player matching this position
+                      const assigned = roster.find((p: any, idx: number) => {
+                        const alreadyFilled = SPORT_CONFIG[selectedSport].positions.slice(0, i)
+                          .some((pp, ii) => ii < i && roster.find((q: any) => q.id === p.id && q.position?.includes(pp)));
+                        return !alreadyFilled && p.position?.toUpperCase().includes(pos) && !roster.slice(0, i).some((r: any) => r.id === p.id);
+                      });
+                      return (
+                        <div
+                          key={`${pos}-${i}`}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-xs font-semibold border",
+                            assigned
+                              ? "bg-primary/15 border-primary/40 text-foreground"
+                              : "bg-muted/30 border-dashed border-border text-muted-foreground"
+                          )}
+                        >
+                          {pos}
+                          {assigned && <span className="ml-1 opacity-70">{assigned.name?.split(" ").slice(-1)[0]}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Stat categories */}
+                  <div className="mt-3 pt-3 border-t border-border">
+                    <p className="text-xs font-semibold text-muted-foreground mb-2">Scoring Categories</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {SPORT_CONFIG[selectedSport].statCategories.map(({ key, label }) => (
+                        <span key={key} className="px-2 py-0.5 bg-muted/50 rounded text-xs text-muted-foreground">
+                          <span className="font-bold text-foreground">{key}</span> {label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {rosterFiltered.map((p: any) => (
                 <MemoizedPlayerCard key={p.id} player={p} compact onRemove={removePlayer} onSelect={setSelectedPlayer} />
               ))}
@@ -525,12 +685,25 @@ export default function FantasyApp() {
                     <Users className="w-7 h-7 text-primary" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-foreground">Build Your Team</h3>
+                    <h3 className="font-bold text-foreground">
+                      Build Your {APP_SPORTS.find(s => s.id === selectedSport)?.label} Team
+                    </h3>
                     <p className="text-sm text-muted-foreground mt-1">
-                      Your roster is empty. Head to the <button onClick={() => setActiveTab("players")} className="text-primary font-semibold hover:underline">Players</button> tab
-                      to search and add players, or check the <button onClick={() => setActiveTab("waiver")} className="text-primary font-semibold hover:underline">Waiver Wire</button> for top pickups.
+                      Your roster is empty. Each sport has its own roster — {SPORT_CONFIG[selectedSport]?.description || "build a team"}.
+                      Head to the <button onClick={() => setActiveTab("players")} className="text-primary font-semibold hover:underline">Players</button> tab
+                      to draft players, or check the <button onClick={() => setActiveTab("waiver")} className="text-primary font-semibold hover:underline">Waiver Wire</button> for top pickups.
                     </p>
                   </div>
+                  {/* Show positions needed */}
+                  {SPORT_CONFIG[selectedSport] && (
+                    <div className="flex flex-wrap gap-1.5 justify-center max-w-sm mx-auto">
+                      {SPORT_CONFIG[selectedSport].positions.map((pos, i) => (
+                        <span key={`${pos}-${i}`} className="px-2 py-0.5 bg-muted/30 border border-dashed border-border rounded text-xs text-muted-foreground">
+                          {pos}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <button onClick={() => setActiveTab("players")} className="btn-primary mx-auto">
                     <UserPlus className="w-4 h-4 mr-1.5" />
                     Browse Players

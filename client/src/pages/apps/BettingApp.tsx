@@ -3,14 +3,16 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Target, RotateCcw, ChevronLeft,
   BarChart2, Trophy, CheckCircle2, XCircle, Clock, AlertCircle, Flame, Search,
-  Trash2, TrendingUp, DollarSign, ArrowUpDown, ChevronUp, ChevronDown
+  Trash2, TrendingUp, TrendingDown, DollarSign, ArrowUpDown, ChevronUp, ChevronDown,
+  Calendar, Zap
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
-import { APP_SPORTS } from "@shared/appSports";
+import { APP_SPORTS, getUserAppSports } from "@shared/appSports";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 const SPORT_GAMES: Record<string, { home: string; away: string; league: string }[]> = {
   basketball: [
     { home: "Boston Celtics", away: "Oklahoma City Thunder", league: "NBA" },
@@ -359,106 +361,198 @@ function AccountCard({ account, onReset }: { account: any; onReset: () => void }
 
 function BetHistoryList({ bets, onCancel }: { bets: any[]; onCancel?: (betId: string) => void }) {
   const [showAll, setShowAll] = useState(false);
+  const [filter, setFilter] = useState<"all" | "pending" | "won" | "lost">("all");
 
   if (bets.length === 0) {
     return (
-      <div className="glass-card p-6 text-center">
-        <Target className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-        <p className="text-sm text-muted-foreground">No bets placed yet</p>
-        <p className="text-xs text-muted-foreground/60 mt-1">Select a game and place your first mock bet</p>
+      <div className="glass-card p-8 text-center space-y-3">
+        <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+          <Target className="w-7 h-7 text-primary" />
+        </div>
+        <div>
+          <h3 className="font-bold text-foreground">No bets yet</h3>
+          <p className="text-xs text-muted-foreground mt-1">Select a game above and place your first mock bet. Results will be auto-settled based on win probability.</p>
+        </div>
       </div>
     );
   }
 
   // Analytics summary
   const settled = bets.filter(b => b.status === "won" || b.status === "lost");
+  const won = bets.filter(b => b.status === "won");
+  const lost = bets.filter(b => b.status === "lost");
+  const pending = bets.filter(b => b.status === "pending");
   const totalWagered = settled.reduce((s: number, b: any) => s + b.amount, 0);
-  const biggestWin = settled.filter(b => b.status === "won").reduce((max: number, b: any) => Math.max(max, b.potentialPayout - b.amount), 0);
-  const pendingCount = bets.filter(b => b.status === "pending").length;
+  const totalWon = won.reduce((s: number, b: any) => s + (b.potentialPayout - b.amount), 0);
+  const totalLost = lost.reduce((s: number, b: any) => s + b.amount, 0);
+  const netProfit = totalWon - totalLost;
+  const biggestWin = won.reduce((max: number, b: any) => Math.max(max, b.potentialPayout - b.amount), 0);
 
-  const displayBets = showAll ? bets : bets.slice(0, 15);
+  // Sort by placed date (newest first)
+  const sortedBets = [...bets].sort((a, b) => new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime());
+
+  // Apply filter
+  const filteredBets = filter === "all" ? sortedBets : sortedBets.filter(b => b.status === filter);
+  const displayBets = showAll ? filteredBets : filteredBets.slice(0, 15);
 
   return (
     <div className="space-y-3">
       {/* Quick stats */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-4 gap-2">
         <div className="glass-card p-3 text-center">
-          <p className="text-lg font-bold text-foreground num">${totalWagered.toFixed(0)}</p>
-          <p className="text-xs text-muted-foreground">Wagered</p>
+          <p className={cn("text-lg font-bold num", netProfit >= 0 ? "text-green-400" : "text-red-400")}>
+            {netProfit >= 0 ? "+" : ""}${netProfit.toFixed(0)}
+          </p>
+          <p className="text-xs text-muted-foreground">Net P/L</p>
+        </div>
+        <div className="glass-card p-3 text-center">
+          <p className="text-lg font-bold text-foreground num">{settled.length > 0 ? `${((won.length / settled.length) * 100).toFixed(0)}%` : "—"}</p>
+          <p className="text-xs text-muted-foreground">Win Rate</p>
         </div>
         <div className="glass-card p-3 text-center">
           <p className="text-lg font-bold text-green-400 num">${biggestWin.toFixed(0)}</p>
           <p className="text-xs text-muted-foreground">Best Win</p>
         </div>
         <div className="glass-card p-3 text-center">
-          <p className="text-lg font-bold text-yellow-400 num">{pendingCount}</p>
+          <p className="text-lg font-bold text-yellow-400 num">{pending.length}</p>
           <p className="text-xs text-muted-foreground">Pending</p>
         </div>
       </div>
 
-      {/* Bet list */}
-      <div className="space-y-2">
-        {displayBets.map(bet => (
-          <div key={bet.id} className={cn(
-            "glass-card p-4 flex items-center justify-between gap-3",
-            bet.status === "won" && "border-green-500/20",
-            bet.status === "lost" && "border-red-500/20",
-            bet.status === "pending" && "border-yellow-500/20"
-          )}>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                {bet.status === "won" && <CheckCircle2 className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />}
-                {bet.status === "lost" && <XCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
-                {bet.status === "pending" && <Clock className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />}
-                {bet.status === "cancelled" && <XCircle className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />}
-                <span className="text-xs font-medium text-foreground truncate">
-                  {bet.homeTeam} vs {bet.awayTeam}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {bet.betType.replace("_", "/")} · ${bet.amount}
-                {bet.selectedTeam && ` · ${bet.selectedTeam}`}
-                {bet.isOver !== undefined && ` · ${bet.isOver ? "Over" : "Under"}`}
-              </p>
-              {bet.result && <p className="text-xs text-muted-foreground/70 mt-0.5">{bet.result}</p>}
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <div className="text-right">
-                <p className={cn("text-sm font-bold num",
-                  bet.status === "won" ? "text-green-400" :
-                  bet.status === "lost" ? "text-red-400" :
-                  "text-muted-foreground"
-                )}>
-                  {bet.status === "won" ? `+$${(bet.potentialPayout - bet.amount).toFixed(2)}` :
-                   bet.status === "lost" ? `-$${bet.amount.toFixed(2)}` :
-                   `$${bet.potentialPayout.toFixed(2)}`}
-                </p>
-                <p className={cn("text-xs font-medium capitalize",
-                  bet.status === "won" ? "text-green-400/70" :
-                  bet.status === "lost" ? "text-red-400/70" :
-                  bet.status === "pending" ? "text-yellow-400/70" :
-                  "text-muted-foreground"
-                )}>
-                  {bet.status}
-                </p>
-              </div>
-              {bet.status === "pending" && onCancel && (
-                <button
-                  onClick={() => onCancel(bet.id)}
-                  className="w-7 h-7 rounded-lg bg-red-500/10 hover:bg-red-500/20 flex items-center justify-center text-red-400 transition-all"
-                  title="Cancel bet"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
+      {/* Filter tabs */}
+      <div className="tab-bar">
+        {[
+          { key: "all", label: `All (${bets.length})` },
+          { key: "pending", label: `Pending (${pending.length})` },
+          { key: "won", label: `Won (${won.length})` },
+          { key: "lost", label: `Lost (${lost.length})` },
+        ].map(({ key, label }) => (
+          <button
+            key={key}
+            className={cn("tab-item text-xs", filter === key && "active")}
+            onClick={() => { setFilter(key as typeof filter); setShowAll(false); }}
+          >
+            {label}
+          </button>
         ))}
       </div>
 
-      {bets.length > 15 && !showAll && (
+      {/* Bet list */}
+      <div className="space-y-2">
+        {displayBets.length === 0 && (
+          <div className="glass-card p-6 text-center">
+            <p className="text-xs text-muted-foreground">No {filter === "all" ? "" : filter} bets</p>
+          </div>
+        )}
+        {displayBets.map(bet => {
+          const profit = bet.potentialPayout - bet.amount;
+          const placedDate = new Date(bet.placedAt);
+          const settledDate = bet.settledAt ? new Date(bet.settledAt) : null;
+          return (
+            <div key={bet.id} className={cn(
+              "glass-card p-4 space-y-2",
+              bet.status === "won" && "border-green-500/30",
+              bet.status === "lost" && "border-red-500/30",
+              bet.status === "pending" && "border-yellow-500/30"
+            )}>
+              {/* Header row */}
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    {bet.status === "won" && <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />}
+                    {bet.status === "lost" && <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />}
+                    {bet.status === "pending" && <Clock className="w-4 h-4 text-yellow-400 flex-shrink-0" />}
+                    {bet.status === "cancelled" && <XCircle className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
+                    <span className="text-sm font-semibold text-foreground truncate">
+                      {bet.awayTeam} @ {bet.homeTeam}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 bg-muted/50 rounded text-xs font-medium text-muted-foreground capitalize">
+                      {bet.betType.replace("_", "/")}
+                    </span>
+                    {bet.selectedTeam && (
+                      <span className="px-2 py-0.5 bg-primary/10 rounded text-xs font-medium text-primary">
+                        {bet.selectedTeam}
+                      </span>
+                    )}
+                    {bet.isOver !== undefined && (
+                      <span className="px-2 py-0.5 bg-primary/10 rounded text-xs font-medium text-primary">
+                        {bet.isOver ? `Over ${bet.overUnder}` : `Under ${bet.overUnder}`}
+                      </span>
+                    )}
+                    {bet.spread !== undefined && bet.betType === "spread" && (
+                      <span className="px-2 py-0.5 bg-primary/10 rounded text-xs font-medium text-primary">
+                        {bet.spread > 0 ? "+" : ""}{bet.spread}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className={cn("text-base font-bold num",
+                    bet.status === "won" ? "text-green-400" :
+                    bet.status === "lost" ? "text-red-400" :
+                    "text-muted-foreground"
+                  )}>
+                    {bet.status === "won" ? `+$${profit.toFixed(2)}` :
+                     bet.status === "lost" ? `-$${bet.amount.toFixed(2)}` :
+                     bet.status === "pending" ? `$${bet.potentialPayout.toFixed(2)}` :
+                     `$${bet.amount.toFixed(2)}`}
+                  </p>
+                  <p className={cn("text-xs font-medium capitalize",
+                    bet.status === "won" ? "text-green-400/70" :
+                    bet.status === "lost" ? "text-red-400/70" :
+                    bet.status === "pending" ? "text-yellow-400/70" :
+                    "text-muted-foreground"
+                  )}>
+                    {bet.status === "pending" ? "To Win" : bet.status}
+                  </p>
+                </div>
+              </div>
+
+              {/* Detail row */}
+              <div className="flex items-center justify-between pt-2 border-t border-border/40">
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span>Stake: <span className="font-semibold text-foreground num">${bet.amount}</span></span>
+                  <span>Odds: <span className="font-semibold text-foreground num">{bet.odds > 0 ? "+" : ""}{bet.odds}</span></span>
+                  <span>{Math.round((bet.winProbability || 0.5) * 100)}% chance</span>
+                </div>
+                {bet.status === "pending" && onCancel && (
+                  <button
+                    onClick={() => onCancel(bet.id)}
+                    className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-all"
+                    title="Cancel bet"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Cancel
+                  </button>
+                )}
+              </div>
+
+              {/* Timestamps */}
+              <div className="flex items-center gap-3 text-xs text-muted-foreground/70">
+                <span><Calendar className="inline w-3 h-3 mr-0.5" /> Placed {placedDate.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                {settledDate && (
+                  <span>Settled {settledDate.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                )}
+              </div>
+
+              {bet.result && (
+                <p className={cn("text-xs font-medium",
+                  bet.status === "won" ? "text-green-400" :
+                  bet.status === "lost" ? "text-red-400" : "text-muted-foreground"
+                )}>
+                  {bet.result}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {filteredBets.length > 15 && !showAll && (
         <button onClick={() => setShowAll(true)} className="btn-ghost w-full text-xs">
-          Show all {bets.length} bets
+          Show all {filteredBets.length} bets
         </button>
       )}
     </div>
@@ -467,13 +561,22 @@ function BetHistoryList({ bets, onCancel }: { bets: any[]; onCancel?: (betId: st
 
 export default function BettingApp() {
   const { user } = useAuth();
+  const { preferences } = useUserPreferences();
   const userId = user?.id || "default";
-  const [selectedSport, setSelectedSport] = useState("basketball");
+  const userSports = useMemo(() => getUserAppSports(preferences.favoriteSports), [preferences.favoriteSports]);
+  const [selectedSport, setSelectedSport] = useState(userSports[0]?.id || "basketball");
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
   const [gameSearch, setGameSearch] = useState("");
   const debouncedGameSearch = useDebouncedValue(gameSearch, 300);
   const [activeTab, setActiveTab] = useState<"analyze" | "mybets">("analyze");
   const qc = useQueryClient();
+
+  // If the selected sport isn't in user's favorites, reset to first fav
+  useEffect(() => {
+    if (!userSports.some(s => s.id === selectedSport)) {
+      setSelectedSport(userSports[0]?.id || "basketball");
+    }
+  }, [userSports, selectedSport]);
 
   const {
     data: scheduleData,
@@ -684,7 +787,7 @@ export default function BettingApp() {
               </div>
             )}
             <div className="tab-bar">
-              {APP_SPORTS.map((s) => (
+              {userSports.map((s) => (
                 <button
                   key={s.id}
                   className={cn("tab-item text-xs", selectedSport === s.id && "active")}

@@ -49,8 +49,11 @@ function AuthGate() {
     return <Login />;
   }
 
-  // Show onboarding for new users who haven't completed it
-  if (isNewUser || !localStorage.getItem("onboarding_complete")) {
+  // Check per-user onboarding completion
+  const onboardingKey = `onboarding_complete_${user.id}`;
+  const onboardingDone = !!localStorage.getItem(onboardingKey) || !!localStorage.getItem("onboarding_complete");
+
+  if (isNewUser || !onboardingDone) {
     return <Onboarding />;
   }
 

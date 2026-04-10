@@ -42,13 +42,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       return { error: error.message };
     }
-    // Check if user has completed onboarding
-    const onboarded = localStorage.getItem("onboarding_complete");
-    if (!onboarded) {
+    // Check if this user has completed onboarding
+    const userId = data.user?.id;
+    const perUserDone = userId && localStorage.getItem(`onboarding_complete_${userId}`);
+    const legacyDone = localStorage.getItem("onboarding_complete");
+    if (!perUserDone && !legacyDone) {
       setIsNewUser(true);
     }
     return { error: null };
