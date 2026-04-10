@@ -2,13 +2,15 @@ import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Target, RotateCcw, ChevronLeft,
-  BarChart2, Trophy, CheckCircle2, XCircle, Clock, AlertCircle, Flame, Search
+  BarChart2, Trophy, CheckCircle2, XCircle, Clock, AlertCircle, Flame, Search,
+  Trash2, TrendingUp, DollarSign, ArrowUpDown, ChevronUp, ChevronDown
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
 import { APP_SPORTS } from "@shared/appSports";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/contexts/AuthContext";
 const SPORT_GAMES: Record<string, { home: string; away: string; league: string }[]> = {
   basketball: [
     { home: "Boston Celtics", away: "Oklahoma City Thunder", league: "NBA" },
@@ -87,18 +89,20 @@ function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (b
   const oddsLabel =
     analysis.oddsSource === "sportsbook"
       ? "Lines: sportsbook (The Odds API)"
-      : "Lines: internal model (set ODDS_API_KEY for live books)";
+      : "Lines: internal model";
   const [betType, setBetType] = useState<"moneyline" | "spread" | "over_under">("moneyline");
   const [selectedTeam, setSelectedTeam] = useState(
     analysis.homeWinProbability > 0.5 ? analysis.homeTeam : analysis.awayTeam
   );
+  const [spreadSide, setSpreadSide] = useState<"home" | "away">("home");
+  const [overUnderSide, setOverUnderSide] = useState<"over" | "under">("over");
   const [stake, setStake] = useState(50);
 
   const getOdds = () => {
     if (betType === "moneyline") {
       return selectedTeam === analysis.homeTeam ? analysis.homeMoneyline : analysis.awayMoneyline;
     }
-    return -110; // Standard spread/OU odds
+    return -110;
   };
 
   const calculatePayout = () => {
@@ -111,7 +115,7 @@ function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (b
     if (betType === "moneyline") {
       return selectedTeam === analysis.homeTeam ? analysis.homeWinProbability : analysis.awayWinProbability;
     }
-    return 0.5; // Roughly 50/50 for spread/OU
+    return 0.5;
   };
 
   const formatOdds = (odds: number) => odds > 0 ? `+${odds}` : `${odds}`;
@@ -121,6 +125,15 @@ function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (b
       <p className="text-[11px] text-muted-foreground border border-border/60 rounded-lg px-2 py-1.5 bg-muted/20">
         {oddsLabel}
       </p>
+      {/* Team records */}
+      {(analysis.homeRecord || analysis.awayRecord) && (
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>{analysis.homeTeam} <span className="font-bold text-foreground">({analysis.homeRecord})</span></span>
+          <span className="text-muted-foreground/60">vs</span>
+          <span><span className="font-bold text-foreground">({analysis.awayRecord})</span> {analysis.awayTeam}</span>
+        </div>
+      )}
+
       {/* Win probability */}
       <WinProbabilityBar
         homeTeam={analysis.homeTeam}
@@ -181,6 +194,64 @@ function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (b
         ))}
       </div>
 
+      {/* Spread side selection */}
+      {betType === "spread" && (
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => setSpreadSide("home")}
+            className={cn("p-3 rounded-xl border transition-all text-left",
+              spreadSide === "home" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30"
+            )}
+          >
+            <p className="text-xs text-muted-foreground truncate">{analysis.homeTeam}</p>
+            <p className="text-sm font-bold text-foreground num">
+              {analysis.recommendedSpread > 0 ? `+${analysis.recommendedSpread}` : analysis.recommendedSpread}
+            </p>
+          </button>
+          <button
+            onClick={() => setSpreadSide("away")}
+            className={cn("p-3 rounded-xl border transition-all text-left",
+              spreadSide === "away" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30"
+            )}
+          >
+            <p className="text-xs text-muted-foreground truncate">{analysis.awayTeam}</p>
+            <p className="text-sm font-bold text-foreground num">
+              {analysis.recommendedSpread > 0 ? `-${analysis.recommendedSpread}` : `+${Math.abs(analysis.recommendedSpread)}`}
+            </p>
+          </button>
+        </div>
+      )}
+
+      {/* Over/Under direction */}
+      {betType === "over_under" && (
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => setOverUnderSide("over")}
+            className={cn("p-3 rounded-xl border transition-all flex items-center gap-2",
+              overUnderSide === "over" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30"
+            )}
+          >
+            <ChevronUp className="w-4 h-4 text-green-400" />
+            <div>
+              <p className="text-sm font-bold text-foreground">Over {analysis.recommendedOverUnder}</p>
+              <p className="text-xs text-muted-foreground">-110</p>
+            </div>
+          </button>
+          <button
+            onClick={() => setOverUnderSide("under")}
+            className={cn("p-3 rounded-xl border transition-all flex items-center gap-2",
+              overUnderSide === "under" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30"
+            )}
+          >
+            <ChevronDown className="w-4 h-4 text-red-400" />
+            <div>
+              <p className="text-sm font-bold text-foreground">Under {analysis.recommendedOverUnder}</p>
+              <p className="text-xs text-muted-foreground">-110</p>
+            </div>
+          </button>
+        </div>
+      )}
+
       {/* Confidence & key factors */}
       <div className="space-y-3">
         <div className="flex items-center gap-2">
@@ -229,16 +300,19 @@ function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (b
               awayTeam: analysis.awayTeam,
               sport: analysis.sport,
               betType,
-              selectedTeam: betType === "moneyline" ? selectedTeam : undefined,
+              selectedTeam: betType === "moneyline" ? selectedTeam :
+                            betType === "spread" ? (spreadSide === "home" ? analysis.homeTeam : analysis.awayTeam) :
+                            undefined,
               amount: stake,
               odds: getOdds(),
               spread: betType === "spread" ? analysis.recommendedSpread : undefined,
               overUnder: betType === "over_under" ? analysis.recommendedOverUnder : undefined,
+              isOver: betType === "over_under" ? overUnderSide === "over" : undefined,
               winProbability: getWinProb(),
             })}
             className="btn-primary"
           >
-            Place Bet
+            Place ${stake} Bet
           </button>
         </div>
       </div>
@@ -283,7 +357,9 @@ function AccountCard({ account, onReset }: { account: any; onReset: () => void }
   );
 }
 
-function BetHistoryList({ bets }: { bets: any[] }) {
+function BetHistoryList({ bets, onCancel }: { bets: any[]; onCancel?: (betId: string) => void }) {
+  const [showAll, setShowAll] = useState(false);
+
   if (bets.length === 0) {
     return (
       <div className="glass-card p-6 text-center">
@@ -294,56 +370,104 @@ function BetHistoryList({ bets }: { bets: any[] }) {
     );
   }
 
+  // Analytics summary
+  const settled = bets.filter(b => b.status === "won" || b.status === "lost");
+  const totalWagered = settled.reduce((s: number, b: any) => s + b.amount, 0);
+  const biggestWin = settled.filter(b => b.status === "won").reduce((max: number, b: any) => Math.max(max, b.potentialPayout - b.amount), 0);
+  const pendingCount = bets.filter(b => b.status === "pending").length;
+
+  const displayBets = showAll ? bets : bets.slice(0, 15);
+
   return (
-    <div className="space-y-2">
-      {bets.slice(0, 10).map(bet => (
-        <div key={bet.id} className={cn(
-          "glass-card p-4 flex items-center justify-between gap-3",
-          bet.status === "won" && "border-green-500/20",
-          bet.status === "lost" && "border-red-500/20",
-          bet.status === "pending" && "border-yellow-500/20"
-        )}>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              {bet.status === "won" && <CheckCircle2 className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />}
-              {bet.status === "lost" && <XCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
-              {bet.status === "pending" && <Clock className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />}
-              {bet.status === "cancelled" && <XCircle className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />}
-              <span className="text-xs font-medium text-foreground truncate">
-                {bet.homeTeam} vs {bet.awayTeam}
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {bet.betType.replace("_", "/")} · ${bet.amount}
-              {bet.selectedTeam && ` · ${bet.selectedTeam}`}
-            </p>
-          </div>
-          <div className="text-right flex-shrink-0">
-            <p className={cn("text-sm font-bold num",
-              bet.status === "won" ? "text-green-400" :
-              bet.status === "lost" ? "text-red-400" :
-              "text-muted-foreground"
-            )}>
-              {bet.status === "won" ? `+$${(bet.potentialPayout - bet.amount).toFixed(2)}` :
-               bet.status === "lost" ? `-$${bet.amount.toFixed(2)}` :
-               `$${bet.potentialPayout.toFixed(2)}`}
-            </p>
-            <p className={cn("text-xs font-medium capitalize",
-              bet.status === "won" ? "text-green-400/70" :
-              bet.status === "lost" ? "text-red-400/70" :
-              bet.status === "pending" ? "text-yellow-400/70" :
-              "text-muted-foreground"
-            )}>
-              {bet.status}
-            </p>
-          </div>
+    <div className="space-y-3">
+      {/* Quick stats */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="glass-card p-3 text-center">
+          <p className="text-lg font-bold text-foreground num">${totalWagered.toFixed(0)}</p>
+          <p className="text-xs text-muted-foreground">Wagered</p>
         </div>
-      ))}
+        <div className="glass-card p-3 text-center">
+          <p className="text-lg font-bold text-green-400 num">${biggestWin.toFixed(0)}</p>
+          <p className="text-xs text-muted-foreground">Best Win</p>
+        </div>
+        <div className="glass-card p-3 text-center">
+          <p className="text-lg font-bold text-yellow-400 num">{pendingCount}</p>
+          <p className="text-xs text-muted-foreground">Pending</p>
+        </div>
+      </div>
+
+      {/* Bet list */}
+      <div className="space-y-2">
+        {displayBets.map(bet => (
+          <div key={bet.id} className={cn(
+            "glass-card p-4 flex items-center justify-between gap-3",
+            bet.status === "won" && "border-green-500/20",
+            bet.status === "lost" && "border-red-500/20",
+            bet.status === "pending" && "border-yellow-500/20"
+          )}>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                {bet.status === "won" && <CheckCircle2 className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />}
+                {bet.status === "lost" && <XCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
+                {bet.status === "pending" && <Clock className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />}
+                {bet.status === "cancelled" && <XCircle className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />}
+                <span className="text-xs font-medium text-foreground truncate">
+                  {bet.homeTeam} vs {bet.awayTeam}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {bet.betType.replace("_", "/")} · ${bet.amount}
+                {bet.selectedTeam && ` · ${bet.selectedTeam}`}
+                {bet.isOver !== undefined && ` · ${bet.isOver ? "Over" : "Under"}`}
+              </p>
+              {bet.result && <p className="text-xs text-muted-foreground/70 mt-0.5">{bet.result}</p>}
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="text-right">
+                <p className={cn("text-sm font-bold num",
+                  bet.status === "won" ? "text-green-400" :
+                  bet.status === "lost" ? "text-red-400" :
+                  "text-muted-foreground"
+                )}>
+                  {bet.status === "won" ? `+$${(bet.potentialPayout - bet.amount).toFixed(2)}` :
+                   bet.status === "lost" ? `-$${bet.amount.toFixed(2)}` :
+                   `$${bet.potentialPayout.toFixed(2)}`}
+                </p>
+                <p className={cn("text-xs font-medium capitalize",
+                  bet.status === "won" ? "text-green-400/70" :
+                  bet.status === "lost" ? "text-red-400/70" :
+                  bet.status === "pending" ? "text-yellow-400/70" :
+                  "text-muted-foreground"
+                )}>
+                  {bet.status}
+                </p>
+              </div>
+              {bet.status === "pending" && onCancel && (
+                <button
+                  onClick={() => onCancel(bet.id)}
+                  className="w-7 h-7 rounded-lg bg-red-500/10 hover:bg-red-500/20 flex items-center justify-center text-red-400 transition-all"
+                  title="Cancel bet"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {bets.length > 15 && !showAll && (
+        <button onClick={() => setShowAll(true)} className="btn-ghost w-full text-xs">
+          Show all {bets.length} bets
+        </button>
+      )}
     </div>
   );
 }
 
 export default function BettingApp() {
+  const { user } = useAuth();
+  const userId = user?.id || "default";
   const [selectedSport, setSelectedSport] = useState("basketball");
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
   const [gameSearch, setGameSearch] = useState("");
@@ -431,9 +555,9 @@ export default function BettingApp() {
   });
 
   const { data: account } = useQuery({
-    queryKey: ["/api/betting/account/default"],
+    queryKey: ["betting-account", userId],
     queryFn: async () => {
-      const res = await fetch("/api/betting/account/default");
+      const res = await fetch(`/api/betting/account/${userId}`);
       return res.json();
     },
     refetchInterval: 30000,
@@ -441,9 +565,9 @@ export default function BettingApp() {
   });
 
   const { data: bets } = useQuery({
-    queryKey: ["/api/betting/bets/default"],
+    queryKey: ["betting-bets", userId],
     queryFn: async () => {
-      const res = await fetch("/api/betting/bets/default");
+      const res = await fetch(`/api/betting/bets/${userId}`);
       return res.json();
     },
     refetchInterval: 30000,
@@ -473,7 +597,7 @@ export default function BettingApp() {
 
   const placeBetMutation = useMutation({
     mutationFn: async (betData: any) => {
-      const res = await fetch("/api/betting/bets/default", {
+      const res = await fetch(`/api/betting/bets/${userId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(betData),
@@ -483,22 +607,39 @@ export default function BettingApp() {
       return data;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/betting/account/default"] });
-      qc.invalidateQueries({ queryKey: ["/api/betting/bets/default"] });
+      qc.invalidateQueries({ queryKey: ["betting-account", userId] });
+      qc.invalidateQueries({ queryKey: ["betting-bets", userId] });
       setActiveTab("mybets");
+    },
+  });
+
+  const cancelBetMutation = useMutation({
+    mutationFn: async (betId: string) => {
+      const res = await fetch(`/api/betting/bets/${userId}/${betId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["betting-account", userId] });
+      qc.invalidateQueries({ queryKey: ["betting-bets", userId] });
     },
   });
 
   const resetMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/betting/account/default/reset", { method: "POST" });
+      const res = await fetch(`/api/betting/account/${userId}/reset`, { method: "POST" });
       return res.json();
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/betting/account/default"] });
-      qc.invalidateQueries({ queryKey: ["/api/betting/bets/default"] });
+      qc.invalidateQueries({ queryKey: ["betting-account", userId] });
+      qc.invalidateQueries({ queryKey: ["betting-bets", userId] });
     },
   });
+
+  const handleCancelBet = useCallback((betId: string) => {
+    cancelBetMutation.mutate(betId);
+  }, []);
 
   return (
     <div className="animate-fade-in max-w-4xl">
@@ -702,7 +843,7 @@ export default function BettingApp() {
           )}
 
           {activeTab === "mybets" && (
-            <MemoizedBetHistoryList bets={bets || []} />
+            <MemoizedBetHistoryList bets={bets || []} onCancel={handleCancelBet} />
           )}
         </div>
       </div>

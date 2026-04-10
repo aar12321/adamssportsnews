@@ -2,12 +2,13 @@ import React, { useState } from "react";
 import {
   User, Palette, Bell, LayoutDashboard, Trophy, Target, Smartphone,
   Monitor, Sun, Moon, ChevronRight, Check, Save, RotateCcw,
-  Shield, Activity, AlertCircle, DollarSign, Users, BarChart3
+  Shield, Activity, AlertCircle, DollarSign, Users, BarChart3, LogOut, Mail
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useViewMode } from "@/contexts/ViewModeContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 const SPORTS = [
   { key: "basketball", label: "Basketball (NBA)", emoji: "🏀" },
@@ -86,6 +87,7 @@ export default function Profile() {
   const { preferences, updatePreferences, updateDashboardLayout, updateNotifications, updateBettingPrefs, resetPreferences } = useUserPreferences();
   const { theme, setTheme } = useTheme();
   const { viewMode, setViewMode } = useViewMode();
+  const { user, signOut } = useAuth();
   const [saved, setSaved] = useState(false);
   const [activeSection, setActiveSection] = useState("account");
 
@@ -162,7 +164,7 @@ export default function Profile() {
                 <User className="w-8 h-8 text-white" />
               </div>
               <p className="font-bold text-foreground">{preferences.displayName}</p>
-              <p className="text-xs text-muted-foreground">Member</p>
+              <p className="text-xs text-muted-foreground truncate max-w-full">{user?.email || "Member"}</p>
             </div>
 
             <nav className="space-y-0.5">
@@ -182,6 +184,16 @@ export default function Profile() {
                 </button>
               ))}
             </nav>
+
+            <div className="mt-4 pt-4 border-t border-border">
+              <button
+                onClick={signOut}
+                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-red-400 hover:bg-red-500/10 transition-all"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign Out
+              </button>
+            </div>
           </div>
         </div>
 
@@ -192,6 +204,13 @@ export default function Profile() {
           {activeSection === "account" && (
             <Section title="Account" icon={User}>
               <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Email</label>
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/30 border border-border rounded-xl">
+                    <Mail className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm text-foreground">{user?.email || "—"}</span>
+                  </div>
+                </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Display Name</label>
                   <input

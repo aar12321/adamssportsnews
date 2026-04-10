@@ -367,10 +367,87 @@ function LeagueLeaders({ sport }: { sport: string }) {
   );
 }
 
+function PlayerDetail({ player }: { player: any }) {
+  const statEntries = Object.entries(player.stats || {});
+  return (
+    <div className="space-y-4 animate-fade-in">
+      <div className="glass-card p-5">
+        <div className="flex items-start gap-4 mb-4">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/20 to-purple-500/20 border border-primary/20 flex items-center justify-center flex-shrink-0">
+            <span className="text-xl font-bold text-primary">
+              {player.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+            </span>
+          </div>
+          <div className="flex-1">
+            <h3 className="text-lg font-bold text-foreground">{player.name}</h3>
+            <p className="text-sm text-muted-foreground">{player.position} · {player.team}</p>
+            <div className="flex items-center gap-2 mt-1">
+              {player.age && <span className="text-xs text-muted-foreground">Age {player.age}</span>}
+              {player.height && <span className="text-xs text-muted-foreground">{player.height}</span>}
+              {player.number && <span className="text-xs text-muted-foreground">#{player.number}</span>}
+            </div>
+          </div>
+          <div className="text-right">
+            {player.rating && (
+              <div className="flex items-center gap-1">
+                <Star className="w-4 h-4 text-yellow-400" />
+                <span className="text-lg font-bold text-foreground">{player.rating}</span>
+              </div>
+            )}
+            <span className={cn(
+              "px-2 py-0.5 rounded text-xs font-bold mt-1 inline-block",
+              player.status === "active" ? "text-green-400 bg-green-500/10" :
+              player.status === "injured" ? "text-red-400 bg-red-500/10" :
+              "text-orange-400 bg-orange-500/10"
+            )}>
+              {player.status}
+            </span>
+          </div>
+        </div>
+        {player.injuryNote && (
+          <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl mb-4">
+            <p className="text-xs text-orange-400">{player.injuryNote}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Stats */}
+      <div className="glass-card p-5">
+        <h4 className="font-bold text-foreground mb-3">Statistics</h4>
+        <div className="grid grid-cols-2 gap-2">
+          {statEntries.map(([key, value]) => (
+            <div key={key} className="bg-muted/50 rounded-xl p-3">
+              <p className="text-xs text-muted-foreground mb-1">{key.replace(/_/g, " ").toUpperCase()}</p>
+              <p className="text-sm font-bold text-foreground num">
+                {typeof value === "number"
+                  ? (value > 1 ? value.toFixed(1) : (value * 100).toFixed(1) + "%")
+                  : value as string}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Recent news */}
+      {player.news?.length > 0 && (
+        <div className="glass-card p-5">
+          <h4 className="font-bold text-foreground mb-3">Recent News</h4>
+          <div className="space-y-2">
+            {player.news.map((item: string, i: number) => (
+              <p key={i} className="text-xs text-muted-foreground border-l-2 border-primary/30 pl-2">{item}</p>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AnalystApp() {
   const [selectedSport, setSelectedSport] = useState("basketball");
   const [activeTab, setActiveTab] = useState<"teams" | "compare" | "players" | "leaders">("teams");
   const [selectedTeam, setSelectedTeam] = useState<any>(null);
+  const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
 
@@ -429,20 +506,24 @@ export default function AnalystApp() {
 
   const handleSelectTeam = useCallback((team: any) => {
     setSelectedTeam(team);
+    setSelectedPlayer(null);
   }, []);
 
-  const handleClearTeam = useCallback(() => {
+  const handleClearSelection = useCallback(() => {
     setSelectedTeam(null);
+    setSelectedPlayer(null);
   }, []);
 
   const handleTabChange = useCallback((key: typeof activeTab) => {
     setActiveTab(key);
     setSelectedTeam(null);
+    setSelectedPlayer(null);
   }, []);
 
   const handleSportChange = useCallback((sportId: string) => {
     setSelectedSport(sportId);
     setSelectedTeam(null);
+    setSelectedPlayer(null);
     setSearchQuery("");
   }, []);
 
@@ -590,7 +671,10 @@ export default function AnalystApp() {
               {(players || []).map((player: any) => (
                 <button
                   key={player.id}
-                  className="w-full text-left glass-card p-4 hover:border-primary/30 transition-all"
+                  onClick={() => { setSelectedPlayer(player); setSelectedTeam(null); }}
+                  className={cn("w-full text-left glass-card p-4 hover:border-primary/30 transition-all",
+                    selectedPlayer?.id === player.id && "border-primary/50 bg-primary/5"
+                  )}
                 >
                   <div className="flex items-center justify-between">
                     <div>
@@ -663,13 +747,24 @@ export default function AnalystApp() {
           {selectedTeam ? (
             <div>
               <button
-                onClick={handleClearTeam}
+                onClick={handleClearSelection}
                 className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" />
-                Back to teams
+                Back to list
               </button>
               <TeamDetail team={selectedTeam} />
+            </div>
+          ) : selectedPlayer ? (
+            <div>
+              <button
+                onClick={handleClearSelection}
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Back to list
+              </button>
+              <PlayerDetail player={selectedPlayer} />
             </div>
           ) : (
             <div className="space-y-4">
@@ -713,8 +808,8 @@ export default function AnalystApp() {
 
               <div className="glass-card p-6 text-center">
                 <BarChart3 className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                <h3 className="font-bold text-foreground mb-1">Select a Team for Deep Analysis</h3>
-                <p className="text-sm text-muted-foreground">Click any team on the left to see full stats, records, key players, and recent form. Use Compare to match any two teams head-to-head.</p>
+                <h3 className="font-bold text-foreground mb-1">Select a Team or Player</h3>
+                <p className="text-sm text-muted-foreground">Click any team or player on the left to see full stats, records, and analysis. Use Compare to match two teams head-to-head.</p>
               </div>
             </div>
           )}

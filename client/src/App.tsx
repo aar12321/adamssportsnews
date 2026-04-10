@@ -15,6 +15,7 @@ import FantasyApp from "@/pages/apps/FantasyApp";
 import AnalystApp from "@/pages/apps/AnalystApp";
 import Profile from "@/pages/Profile";
 import Login from "@/pages/Login";
+import Onboarding from "@/pages/Onboarding";
 import { Loader2 } from "lucide-react";
 
 function Router() {
@@ -34,7 +35,7 @@ function Router() {
 }
 
 function AuthGate() {
-  const { user, loading } = useAuth();
+  const { user, loading, isNewUser } = useAuth();
 
   if (loading) {
     return (
@@ -48,6 +49,11 @@ function AuthGate() {
     return <Login />;
   }
 
+  // Show onboarding for new users who haven't completed it
+  if (isNewUser || !localStorage.getItem("onboarding_complete")) {
+    return <Onboarding />;
+  }
+
   return <Router />;
 }
 
@@ -56,14 +62,14 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <ViewModeProvider>
-          <UserPreferencesProvider>
-            <TooltipProvider>
-              <AuthProvider>
+          <AuthProvider>
+            <UserPreferencesProvider>
+              <TooltipProvider>
                 <Toaster />
                 <AuthGate />
-              </AuthProvider>
-            </TooltipProvider>
-          </UserPreferencesProvider>
+              </TooltipProvider>
+            </UserPreferencesProvider>
+          </AuthProvider>
         </ViewModeProvider>
       </ThemeProvider>
     </QueryClientProvider>
