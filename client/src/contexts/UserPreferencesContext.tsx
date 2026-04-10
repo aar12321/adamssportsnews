@@ -1,14 +1,13 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import type { UserPreferences, SportId } from "@shared/schema";
-
-const USER_ID = "default";
+import { useAuth } from "@/contexts/AuthContext";
 
 const defaultPreferences: UserPreferences = {
-  userId: USER_ID,
+  userId: "default",
   displayName: "Sports Fan",
   favoriteSports: ["basketball", "football"],
-  favoriteTeams: ["Boston Celtics", "Kansas City Chiefs"],
-  favoritePlayers: ["Nikola Jokic", "Patrick Mahomes"],
+  favoriteTeams: [],
+  favoritePlayers: [],
   theme: "dark",
   viewMode: "auto",
   dashboardLayout: {
@@ -34,11 +33,11 @@ const defaultPreferences: UserPreferences = {
   },
   fantasy: {
     teams: [],
-    trackingPlayers: ["p1", "p2", "p3"],
+    trackingPlayers: [],
   },
   analyst: {
-    trackedTeams: ["bos", "okc", "kc"],
-    trackedPlayers: ["ps1", "ps2", "ps3"],
+    trackedTeams: [],
+    trackedPlayers: [],
     compareHistory: [],
   },
 };
@@ -56,21 +55,48 @@ interface UserPreferencesContextValue {
 const UserPreferencesContext = createContext<UserPreferencesContextValue | undefined>(undefined);
 
 export function UserPreferencesProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const userId = user?.id || "default";
+  const storageKey = `userPreferences_${userId}`;
+
   const [preferences, setPreferences] = useState<UserPreferences>(() => {
     try {
-      const stored = localStorage.getItem("userPreferences");
-      return stored ? { ...defaultPreferences, ...JSON.parse(stored) } : defaultPreferences;
+      const stored = localStorage.getItem(storageKey);
+      if (stored) return { ...defaultPreferences, ...JSON.parse(stored), userId };
+      // Try the old key for backward compatibility
+      const old = localStorage.getItem("userPreferences");
+      if (old) return { ...defaultPreferences, ...JSON.parse(old), userId };
+      // Use user metadata for display name
+      const displayName = user?.user_metadata?.display_name || user?.email?.split("@")[0] || "Sports Fan";
+      return { ...defaultPreferences, userId, displayName };
     } catch {
-      return defaultPreferences;
+      return { ...defaultPreferences, userId };
     }
   });
   const [isLoading, setIsLoading] = useState(false);
+
+  // Update userId when user changes
+  useEffect(() => {
+    if (user) {
+      try {
+        const stored = localStorage.getItem(storageKey);
+        if (stored) {
+          setPreferences(prev => ({ ...prev, ...JSON.parse(stored), userId }));
+        } else {
+          const displayName = user.user_metadata?.display_name || user.email?.split("@")[0] || "Sports Fan";
+          setPreferences(prev => ({ ...prev, userId, displayName: prev.displayName === "Sports Fan" ? displayName : prev.displayName }));
+        }
+      } catch {
+        setPreferences(prev => ({ ...prev, userId }));
+      }
+    }
+  }, [userId, storageKey, user]);
 
   // Sync to server
   useEffect(() => {
     const timeout = setTimeout(async () => {
       try {
-        await fetch(`/api/preferences/${USER_ID}`, {
+        await fetch(`/api/preferences/${userId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(preferences),
@@ -80,14 +106,14 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
       }
     }, 1000);
     return () => clearTimeout(timeout);
-  }, [preferences]);
+  }, [preferences, userId]);
 
   // Persist locally
   useEffect(() => {
     try {
-      localStorage.setItem("userPreferences", JSON.stringify(preferences));
+      localStorage.setItem(storageKey, JSON.stringify(preferences));
     } catch {}
-  }, [preferences]);
+  }, [preferences, storageKey]);
 
   const updatePreferences = useCallback((updates: Partial<UserPreferences>) => {
     setPreferences(prev => ({ ...prev, ...updates }));
@@ -115,11 +141,11 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
   }, []);
 
   const resetPreferences = useCallback(() => {
-    setPreferences(defaultPreferences);
+    setPreferences({ ...defaultPreferences, userId });
     try {
-      localStorage.removeItem("userPreferences");
+      localStorage.removeItem(storageKey);
     } catch {}
-  }, []);
+  }, [userId, storageKey]);
 
   return (
     <UserPreferencesContext.Provider value={{

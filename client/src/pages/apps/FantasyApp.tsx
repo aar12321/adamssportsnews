@@ -4,11 +4,48 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Trophy, ChevronLeft, Search, AlertCircle, TrendingUp, TrendingDown,
-  Users, Activity, Star, ArrowLeftRight, Target, RefreshCw, Minus
+  Users, Activity, Star, ArrowLeftRight, Target, RefreshCw, Minus,
+  Plus, X, UserPlus, UserMinus, ChevronRight
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/contexts/AuthContext";
+
+const MAX_ROSTER = 15;
+
+function useLocalRoster(userId: string, sport: string) {
+  const key = `fantasy_roster_${userId}_${sport}`;
+  const [roster, setRoster] = useState<any[]>(() => {
+    try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch { return []; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(key, JSON.stringify(roster)); } catch {}
+  }, [roster, key]);
+
+  useEffect(() => {
+    try { setRoster(JSON.parse(localStorage.getItem(key) || "[]")); } catch { setRoster([]); }
+  }, [key]);
+
+  const addPlayer = useCallback((player: any) => {
+    setRoster(prev => {
+      if (prev.length >= MAX_ROSTER) return prev;
+      if (prev.some(p => p.id === player.id)) return prev;
+      return [...prev, player];
+    });
+  }, []);
+
+  const removePlayer = useCallback((playerId: string) => {
+    setRoster(prev => prev.filter(p => p.id !== playerId));
+  }, []);
+
+  const isOnRoster = useCallback((playerId: string) => {
+    return roster.some(p => p.id === playerId);
+  }, [roster]);
+
+  return { roster, addPlayer, removePlayer, isOnRoster };
+}
 
 const STATUS_CONFIG = {
   active: { label: "Active", className: "text-green-400 bg-green-500/10" },
@@ -20,7 +57,9 @@ const STATUS_CONFIG = {
 
 const MemoizedPlayerCard = React.memo(PlayerCard);
 
-function PlayerCard({ player, compact = false }: { player: any; compact?: boolean }) {
+function PlayerCard({ player, compact = false, onAdd, onRemove, isOnRoster, onSelect }: {
+  player: any; compact?: boolean; onAdd?: (p: any) => void; onRemove?: (id: string) => void; isOnRoster?: boolean; onSelect?: (p: any) => void;
+}) {
   const statusConfig = STATUS_CONFIG[player.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.active;
   const trendIcon = player.trending === "up" ? TrendingUp : player.trending === "down" ? TrendingDown : Minus;
   const trendColor = player.trending === "up" ? "text-green-400" : player.trending === "down" ? "text-red-400" : "text-muted-foreground";
@@ -28,7 +67,7 @@ function PlayerCard({ player, compact = false }: { player: any; compact?: boolea
 
   if (compact) {
     return (
-      <div className="flex items-center justify-between p-3 glass-card hover:border-primary/30 transition-all">
+      <div className="flex items-center justify-between p-3 glass-card hover:border-primary/30 transition-all cursor-pointer" onClick={() => onSelect?.(player)}>
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
             <span className="text-xs font-bold text-primary">{player.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2)}</span>
@@ -38,7 +77,7 @@ function PlayerCard({ player, compact = false }: { player: any; compact?: boolea
             <p className="text-xs text-muted-foreground">{player.position} · {player.team.split(" ").slice(-1)[0]}</p>
           </div>
         </div>
-        <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <span className={cn("px-2 py-0.5 rounded-lg text-xs font-medium", statusConfig.className)}>
             {statusConfig.label}
           </span>
@@ -46,6 +85,15 @@ function PlayerCard({ player, compact = false }: { player: any; compact?: boolea
             <p className="text-sm font-bold text-foreground num">{player.projectedPoints != null ? player.projectedPoints.toFixed(1) : "—"}</p>
             <p className="text-xs text-muted-foreground">proj</p>
           </div>
+          {onRemove && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRemove(player.id); }}
+              className="w-7 h-7 rounded-lg bg-red-500/10 hover:bg-red-500/20 flex items-center justify-center text-red-400 transition-all"
+              title="Drop player"
+            >
+              <UserMinus className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
     );
@@ -119,6 +167,26 @@ function PlayerCard({ player, compact = false }: { player: any; compact?: boolea
             </p>
           ))}
         </div>
+      )}
+
+      {/* Add/Remove from roster */}
+      {onAdd && !isOnRoster && (
+        <button
+          onClick={() => onAdd(player)}
+          className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-all border border-primary/20"
+        >
+          <UserPlus className="w-3.5 h-3.5" />
+          Add to My Roster
+        </button>
+      )}
+      {isOnRoster && onRemove && (
+        <button
+          onClick={() => onRemove(player.id)}
+          className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-500/10 text-red-400 text-xs font-semibold hover:bg-red-500/20 transition-all border border-red-500/20"
+        >
+          <UserMinus className="w-3.5 h-3.5" />
+          Drop from Roster
+        </button>
       )}
     </div>
   );
@@ -257,10 +325,14 @@ function TradeAnalyzer({ sportKey }: { sportKey: string }) {
 }
 
 export default function FantasyApp() {
+  const { user } = useAuth();
+  const userId = user?.id || "default";
   const [selectedSport, setSelectedSport] = useState("basketball");
   const [activeTab, setActiveTab] = useState<"roster" | "players" | "waiver" | "injuries" | "trade">("roster");
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
+  const { roster, addPlayer, removePlayer, isOnRoster } = useLocalRoster(userId, selectedSport);
 
   const { data: team } = useQuery({
     queryKey: ["/api/fantasy/team/sample", selectedSport],
@@ -315,16 +387,15 @@ export default function FantasyApp() {
   }, [topPlayers]);
 
   const rosterFiltered = useMemo(() => {
-    const r = team?.roster || [];
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return r;
-    return r.filter(
-      (p: { name: string; team?: string; position?: string }) =>
+    if (!q) return roster;
+    return roster.filter(
+      (p: any) =>
         p.name.toLowerCase().includes(q) ||
         (p.team && p.team.toLowerCase().includes(q)) ||
         (p.position && p.position.toLowerCase().includes(q))
     );
-  }, [team?.roster, searchQuery]);
+  }, [roster, searchQuery]);
 
   return (
     <div className="animate-fade-in max-w-5xl">
@@ -354,36 +425,42 @@ export default function FantasyApp() {
       </div>
 
       {/* My Team summary */}
-      {team && (
+      {roster.length > 0 && (
         <div className="glass-card p-4 mb-5 animate-fade-in">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <p className="font-bold text-foreground">{team.name}</p>
-              <p className="text-xs text-muted-foreground">{team.league}</p>
+              <p className="font-bold text-foreground">My Fantasy Team</p>
+              <p className="text-xs text-muted-foreground">{roster.length} players · {APP_SPORTS.find(s => s.id === selectedSport)?.label}</p>
             </div>
             <div className="flex items-center gap-3">
               <div className="text-right">
-                <p className="text-xs text-muted-foreground">Record</p>
-                <p className="text-sm font-bold text-foreground">{team.record}</p>
+                <p className="text-xs text-muted-foreground">Roster</p>
+                <p className="text-sm font-bold text-foreground">{roster.length}/{MAX_ROSTER}</p>
               </div>
               <div className="text-right">
-                <p className="text-xs text-muted-foreground">Rank</p>
-                <p className="text-sm font-bold text-primary">{team.standing}</p>
+                <p className="text-xs text-muted-foreground">Total Proj</p>
+                <p className="text-sm font-bold text-primary num">
+                  {roster.reduce((s: number, p: any) => s + (p.projectedPoints || 0), 0).toFixed(1)}
+                </p>
               </div>
               <div className="text-right">
-                <p className="text-xs text-muted-foreground">This Week</p>
-                <p className="text-sm font-bold text-green-400 num">{team.weeklyPoints != null ? team.weeklyPoints.toFixed(1) : "\u2014"}</p>
+                <p className="text-xs text-muted-foreground">Avg Pts</p>
+                <p className="text-sm font-bold text-green-400 num">
+                  {roster.length > 0
+                    ? (roster.reduce((s: number, p: any) => s + (p.averagePoints || 0), 0) / roster.length).toFixed(1)
+                    : "0.0"}
+                </p>
               </div>
             </div>
           </div>
           <div className="relative h-2 bg-muted rounded-full overflow-hidden">
             <div
               className="absolute left-0 top-0 h-full bg-primary rounded-full"
-              style={{ width: `${Math.min((team.weeklyPoints / (team.projectedWeeklyPoints * 1.2)) * 100, 100)}%` }}
+              style={{ width: `${(roster.length / MAX_ROSTER) * 100}%` }}
             />
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            {team.weeklyPoints?.toFixed(1)} / {team.projectedWeeklyPoints?.toFixed(1)} projected pts
+            {roster.length} of {MAX_ROSTER} roster slots filled
           </p>
         </div>
       )}
@@ -394,10 +471,11 @@ export default function FantasyApp() {
           {/* Tab nav */}
           <div className="scroll-row">
             {[
-              { key: "roster", label: "My Roster", Icon: Trophy },
+              { key: "roster", label: `My Roster (${roster.length}/${MAX_ROSTER})`, Icon: Trophy },
               { key: "players", label: "Players", Icon: Users },
               { key: "waiver", label: "Waiver Wire", Icon: Target },
               { key: "injuries", label: "Injuries", Icon: AlertCircle },
+              { key: "trade", label: "Trade", Icon: ArrowLeftRight },
             ].map(({ key, label, Icon }) => (
               <button
                 key={key}
@@ -433,18 +511,30 @@ export default function FantasyApp() {
           {activeTab === "roster" && (
             <div className="space-y-2">
               {rosterFiltered.map((p: any) => (
-                <MemoizedPlayerCard key={p.id} player={p} compact />
+                <MemoizedPlayerCard key={p.id} player={p} compact onRemove={removePlayer} onSelect={setSelectedPlayer} />
               ))}
-              {rosterFiltered.length === 0 && (team?.roster?.length ?? 0) > 0 && (
+              {rosterFiltered.length === 0 && roster.length > 0 && (
                 <div className="glass-card p-6 text-center">
                   <Search className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                   <p className="text-sm text-muted-foreground">No players match your search</p>
                 </div>
               )}
-              {(!team?.roster || team.roster.length === 0) && (
-                <div className="glass-card p-6 text-center">
-                  <Trophy className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">No roster data</p>
+              {roster.length === 0 && (
+                <div className="glass-card p-8 text-center space-y-3">
+                  <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+                    <Users className="w-7 h-7 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-foreground">Build Your Team</h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Your roster is empty. Head to the <button onClick={() => setActiveTab("players")} className="text-primary font-semibold hover:underline">Players</button> tab
+                      to search and add players, or check the <button onClick={() => setActiveTab("waiver")} className="text-primary font-semibold hover:underline">Waiver Wire</button> for top pickups.
+                    </p>
+                  </div>
+                  <button onClick={() => setActiveTab("players")} className="btn-primary mx-auto">
+                    <UserPlus className="w-4 h-4 mr-1.5" />
+                    Browse Players
+                  </button>
                 </div>
               )}
             </div>
@@ -483,7 +573,7 @@ export default function FantasyApp() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {displayPlayers.map((p: any, i: number) => (
                   <div key={p.id} className={cn("animate-fade-in", `stagger-${Math.min(i+1, 4)}`)}>
-                    <MemoizedPlayerCard player={p} />
+                    <MemoizedPlayerCard player={p} onAdd={addPlayer} onRemove={removePlayer} isOnRoster={isOnRoster(p.id)} onSelect={setSelectedPlayer} />
                   </div>
                 ))}
               </div>
@@ -539,13 +629,23 @@ export default function FantasyApp() {
                     <span className="text-xs text-muted-foreground">
                       {target.player.ownership ? `${target.player.ownership}% owned` : "Low ownership"}
                     </span>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-2">
                       {target.player.trending === "up" && <TrendingUp className="w-3.5 h-3.5 text-green-400" />}
                       <span className="text-xs font-bold text-foreground num">
                         {target.player.projectedPoints != null ? target.player.projectedPoints.toFixed(1) : "\u2014"} pts
                       </span>
                     </div>
                   </div>
+                  {!isOnRoster(target.player.id) ? (
+                    <button
+                      onClick={() => addPlayer(target.player)}
+                      className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-green-500/10 text-green-400 text-xs font-semibold hover:bg-green-500/20 transition-all border border-green-500/20"
+                    >
+                      <Plus className="w-3 h-3" /> Add to Roster
+                    </button>
+                  ) : (
+                    <p className="mt-2 text-xs text-primary font-medium text-center">Already on roster</p>
+                  )}
                 </div>
               ))}
             </div>
@@ -617,11 +717,77 @@ export default function FantasyApp() {
               )}
             </div>
           )}
+
+          {/* Trade tab */}
+          {activeTab === "trade" && (
+            <TradeAnalyzer sportKey={selectedSport} />
+          )}
         </div>
 
         {/* Right sidebar */}
         <div className="space-y-4">
-          <TradeAnalyzer sportKey={selectedSport} />
+          {/* Player detail panel */}
+          {selectedPlayer && (
+            <div className="glass-card p-5 space-y-4 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-foreground">Player Detail</h3>
+                <button onClick={() => setSelectedPlayer(null)} className="w-6 h-6 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/20 to-purple-500/20 border border-primary/20 flex items-center justify-center">
+                  <span className="text-lg font-bold text-primary">{selectedPlayer.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2)}</span>
+                </div>
+                <div>
+                  <p className="font-bold text-foreground text-lg">{selectedPlayer.name}</p>
+                  <p className="text-sm text-muted-foreground">{selectedPlayer.position} · {selectedPlayer.team}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="bg-muted/50 rounded-xl p-3 text-center">
+                  <p className="text-xs text-muted-foreground">Avg</p>
+                  <p className="text-lg font-bold text-foreground num">{selectedPlayer.averagePoints?.toFixed(1) || "—"}</p>
+                </div>
+                <div className="bg-muted/50 rounded-xl p-3 text-center">
+                  <p className="text-xs text-muted-foreground">Projected</p>
+                  <p className="text-lg font-bold text-primary num">{selectedPlayer.projectedPoints?.toFixed(1) || "—"}</p>
+                </div>
+                <div className="bg-muted/50 rounded-xl p-3 text-center">
+                  <p className="text-xs text-muted-foreground">Season</p>
+                  <p className="text-lg font-bold text-foreground num">{selectedPlayer.seasonPoints?.toFixed(0) || "—"}</p>
+                </div>
+              </div>
+              {/* All stats */}
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground mb-2">Stats</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(selectedPlayer.stats || {}).map(([key, value]) => (
+                    <span key={key} className="px-2 py-1 bg-muted/50 rounded-lg text-xs text-muted-foreground">
+                      <span className="font-bold text-foreground num">{value != null ? (typeof value === "number" ? value.toFixed(1) : value as string) : "—"}</span> {key.replace("_", "/")}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {selectedPlayer.injuryNote && (
+                <div className="flex items-center gap-2 p-2.5 bg-orange-500/10 border border-orange-500/20 rounded-xl">
+                  <AlertCircle className="w-3.5 h-3.5 text-orange-400" />
+                  <p className="text-xs text-orange-400">{selectedPlayer.injuryNote}</p>
+                </div>
+              )}
+              {!isOnRoster(selectedPlayer.id) ? (
+                <button onClick={() => addPlayer(selectedPlayer)} className="btn-primary w-full">
+                  <UserPlus className="w-4 h-4 mr-1.5" /> Add to Roster
+                </button>
+              ) : (
+                <button onClick={() => removePlayer(selectedPlayer.id)} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-red-500/10 text-red-400 text-sm font-semibold hover:bg-red-500/20 transition-all border border-red-500/20">
+                  <UserMinus className="w-4 h-4" /> Drop from Roster
+                </button>
+              )}
+            </div>
+          )}
+
+          {activeTab !== "trade" && <TradeAnalyzer sportKey={selectedSport} />}
 
           {/* Projections summary */}
           <div className="glass-card p-4 space-y-3">
