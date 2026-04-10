@@ -132,6 +132,10 @@ export interface MockBet {
   potentialPayout: number;
   winProbability: number;
   placedAt: string;
+  /** Scheduled start time of the game (ISO string) */
+  gameStartTime?: string;
+  /** When the game is expected to finish (ISO string) */
+  gameEndTime?: string;
   settledAt?: string;
   result?: string;
 }

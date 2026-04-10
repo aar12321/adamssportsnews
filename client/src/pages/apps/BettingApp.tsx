@@ -87,22 +87,24 @@ const MemoizedAnalysisPanel = React.memo(AnalysisPanel);
 const MemoizedAccountCard = React.memo(AccountCard);
 const MemoizedBetHistoryList = React.memo(BetHistoryList);
 
-function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (bet: any) => void }) {
+type Pick =
+  | { kind: "moneyline"; team: "home" | "away" }
+  | { kind: "spread"; team: "home" | "away" }
+  | { kind: "over_under"; side: "over" | "under" };
+
+function AnalysisPanel({ analysis, game, onPlaceBet }: { analysis: any; game: GameRow; onPlaceBet: (bet: any) => void }) {
   const oddsLabel =
     analysis.oddsSource === "sportsbook"
-      ? "Lines: sportsbook (The Odds API)"
-      : "Lines: internal model";
-  const [betType, setBetType] = useState<"moneyline" | "spread" | "over_under">("moneyline");
-  const [selectedTeam, setSelectedTeam] = useState(
-    analysis.homeWinProbability > 0.5 ? analysis.homeTeam : analysis.awayTeam
-  );
-  const [spreadSide, setSpreadSide] = useState<"home" | "away">("home");
-  const [overUnderSide, setOverUnderSide] = useState<"over" | "under">("over");
+      ? "Lines from sportsbook (The Odds API)"
+      : "Lines from internal model";
+  const [pick, setPick] = useState<Pick>({ kind: "moneyline", team: analysis.homeWinProbability > 0.5 ? "home" : "away" });
   const [stake, setStake] = useState(50);
 
+  const formatOdds = (odds: number) => odds > 0 ? `+${odds}` : `${odds}`;
+
   const getOdds = () => {
-    if (betType === "moneyline") {
-      return selectedTeam === analysis.homeTeam ? analysis.homeMoneyline : analysis.awayMoneyline;
+    if (pick.kind === "moneyline") {
+      return pick.team === "home" ? analysis.homeMoneyline : analysis.awayMoneyline;
     }
     return -110;
   };
@@ -114,210 +116,302 @@ function AnalysisPanel({ analysis, onPlaceBet }: { analysis: any; onPlaceBet: (b
   };
 
   const getWinProb = () => {
-    if (betType === "moneyline") {
-      return selectedTeam === analysis.homeTeam ? analysis.homeWinProbability : analysis.awayWinProbability;
+    if (pick.kind === "moneyline") {
+      return pick.team === "home" ? analysis.homeWinProbability : analysis.awayWinProbability;
     }
     return 0.5;
   };
 
-  const formatOdds = (odds: number) => odds > 0 ? `+${odds}` : `${odds}`;
+  const pickDescription = () => {
+    if (pick.kind === "moneyline") {
+      const name = pick.team === "home" ? analysis.homeTeam : analysis.awayTeam;
+      return `${name} to win`;
+    }
+    if (pick.kind === "spread") {
+      const name = pick.team === "home" ? analysis.homeTeam : analysis.awayTeam;
+      const homeSp = analysis.recommendedSpread;
+      const line = pick.team === "home" ? homeSp : -homeSp;
+      return `${name} ${line > 0 ? "+" : ""}${line}`;
+    }
+    return `${pick.side === "over" ? "Over" : "Under"} ${analysis.recommendedOverUnder}`;
+  };
+
+  const handlePlaceBet = () => {
+    const homeSp = analysis.recommendedSpread;
+    onPlaceBet({
+      gameId: analysis.gameId,
+      homeTeam: analysis.homeTeam,
+      awayTeam: analysis.awayTeam,
+      sport: analysis.sport,
+      betType: pick.kind,
+      selectedTeam:
+        pick.kind === "moneyline"
+          ? pick.team === "home" ? analysis.homeTeam : analysis.awayTeam
+          : pick.kind === "spread"
+          ? pick.team === "home" ? analysis.homeTeam : analysis.awayTeam
+          : undefined,
+      amount: stake,
+      odds: getOdds(),
+      spread: pick.kind === "spread" ? (pick.team === "home" ? homeSp : -homeSp) : undefined,
+      overUnder: pick.kind === "over_under" ? analysis.recommendedOverUnder : undefined,
+      isOver: pick.kind === "over_under" ? pick.side === "over" : undefined,
+      winProbability: getWinProb(),
+      gameStartTime: game.startTime,
+    });
+  };
+
+  const gameStart = game.startTime ? new Date(game.startTime) : null;
+  const hasStarted = gameStart ? gameStart.getTime() <= Date.now() : false;
 
   return (
     <div className="glass-card p-5 space-y-5">
-      <p className="text-[11px] text-muted-foreground border border-border/60 rounded-lg px-2 py-1.5 bg-muted/20">
-        {oddsLabel}
-      </p>
-      {/* Team records */}
-      {(analysis.homeRecord || analysis.awayRecord) && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{analysis.homeTeam} <span className="font-bold text-foreground">({analysis.homeRecord})</span></span>
-          <span className="text-muted-foreground/60">vs</span>
-          <span><span className="font-bold text-foreground">({analysis.awayRecord})</span> {analysis.awayTeam}</span>
+      {/* Matchup header */}
+      <div className="text-center space-y-1">
+        <p className="text-xs text-muted-foreground">{game.league}</p>
+        <h3 className="text-lg font-bold text-foreground">{analysis.awayTeam} @ {analysis.homeTeam}</h3>
+        {gameStart && (
+          <p className="text-xs text-muted-foreground">
+            {gameStart.toLocaleString(undefined, {
+              weekday: "short", month: "short", day: "numeric",
+              hour: "numeric", minute: "2-digit",
+            })}
+          </p>
+        )}
+      </div>
+
+      {hasStarted && (
+        <div className="flex items-center gap-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+          <AlertCircle className="w-4 h-4 text-yellow-400 flex-shrink-0" />
+          <p className="text-xs text-yellow-400">This game has already started — betting closed.</p>
         </div>
       )}
 
-      {/* Win probability */}
-      <WinProbabilityBar
-        homeTeam={analysis.homeTeam}
-        awayTeam={analysis.awayTeam}
-        homeProb={analysis.homeWinProbability}
-        awayProb={analysis.awayWinProbability}
-      />
-
-      {/* Stats row */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-muted/50 rounded-xl p-3">
-          <p className="text-xs text-muted-foreground mb-1">Recommended Spread</p>
-          <p className="text-lg font-bold text-foreground">
-            {analysis.recommendedSpread != null
-              ? `${analysis.recommendedSpread > 0 ? "+" : ""}${analysis.recommendedSpread}`
-              : "Pending analysis"}
-          </p>
-          <p className="text-xs text-muted-foreground">{analysis.homeTeam || "—"}</p>
+      {/* Step 1: Pick your bet (team cards) */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-5 h-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold">1</div>
+          <p className="text-sm font-semibold text-foreground">Pick a team to win</p>
         </div>
-        <div className="bg-muted/50 rounded-xl p-3">
-          <p className="text-xs text-muted-foreground mb-1">Over/Under</p>
-          <p className="text-lg font-bold text-foreground">
-            {analysis.recommendedOverUnder != null ? analysis.recommendedOverUnder : "Pending analysis"}
-          </p>
-          <p className="text-xs text-muted-foreground">Total points</p>
-        </div>
-      </div>
-
-      {/* Moneylines */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className={cn("p-3 rounded-xl border cursor-pointer transition-all", selectedTeam === analysis.homeTeam && betType === "moneyline" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30")}
-          onClick={() => { setBetType("moneyline"); setSelectedTeam(analysis.homeTeam); }}>
-          <p className="text-xs text-muted-foreground truncate">{analysis.homeTeam || "—"}</p>
-          <p className={cn("text-base font-bold num", analysis.homeMoneyline < 0 ? "text-green-400" : "text-foreground")}>
-            {analysis.homeMoneyline != null ? formatOdds(analysis.homeMoneyline) : "Pending analysis"}
-          </p>
-        </div>
-        <div className={cn("p-3 rounded-xl border cursor-pointer transition-all", selectedTeam === analysis.awayTeam && betType === "moneyline" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30")}
-          onClick={() => { setBetType("moneyline"); setSelectedTeam(analysis.awayTeam); }}>
-          <p className="text-xs text-muted-foreground truncate">{analysis.awayTeam || "—"}</p>
-          <p className={cn("text-base font-bold num", analysis.awayMoneyline < 0 ? "text-green-400" : "text-foreground")}>
-            {analysis.awayMoneyline != null ? formatOdds(analysis.awayMoneyline) : "Pending analysis"}
-          </p>
-        </div>
-      </div>
-
-      {/* Bet type selector */}
-      <div className="tab-bar">
-        {[
-          { key: "moneyline", label: "Moneyline" },
-          { key: "spread", label: "Spread" },
-          { key: "over_under", label: "Over/Under" },
-        ].map(({ key, label }) => (
-          <button key={key} className={cn("tab-item", betType === key && "active")}
-            onClick={() => setBetType(key as typeof betType)}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Spread side selection */}
-      {betType === "spread" && (
         <div className="grid grid-cols-2 gap-3">
+          {/* Away team card */}
           <button
-            onClick={() => setSpreadSide("home")}
-            className={cn("p-3 rounded-xl border transition-all text-left",
-              spreadSide === "home" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30"
+            onClick={() => setPick({ kind: "moneyline", team: "away" })}
+            disabled={hasStarted}
+            className={cn(
+              "p-4 rounded-xl border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed",
+              pick.kind === "moneyline" && pick.team === "away"
+                ? "bg-primary/15 border-primary ring-2 ring-primary/40"
+                : "bg-muted/30 border-border hover:border-primary/30"
             )}
           >
-            <p className="text-xs text-muted-foreground truncate">{analysis.homeTeam}</p>
-            <p className="text-sm font-bold text-foreground num">
-              {analysis.recommendedSpread > 0 ? `+${analysis.recommendedSpread}` : analysis.recommendedSpread}
+            <p className="text-xs text-muted-foreground mb-1">AWAY</p>
+            <p className="text-sm font-bold text-foreground truncate">{analysis.awayTeam}</p>
+            <p className="text-xs text-muted-foreground">{analysis.awayRecord || "—"}</p>
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Moneyline</span>
+              <span className={cn("text-base font-bold num", analysis.awayMoneyline < 0 ? "text-green-400" : "text-primary")}>
+                {formatOdds(analysis.awayMoneyline)}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {(analysis.awayWinProbability * 100).toFixed(0)}% win chance
             </p>
           </button>
+
+          {/* Home team card */}
           <button
-            onClick={() => setSpreadSide("away")}
-            className={cn("p-3 rounded-xl border transition-all text-left",
-              spreadSide === "away" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30"
+            onClick={() => setPick({ kind: "moneyline", team: "home" })}
+            disabled={hasStarted}
+            className={cn(
+              "p-4 rounded-xl border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed",
+              pick.kind === "moneyline" && pick.team === "home"
+                ? "bg-primary/15 border-primary ring-2 ring-primary/40"
+                : "bg-muted/30 border-border hover:border-primary/30"
             )}
           >
-            <p className="text-xs text-muted-foreground truncate">{analysis.awayTeam}</p>
-            <p className="text-sm font-bold text-foreground num">
-              {analysis.recommendedSpread > 0 ? `-${analysis.recommendedSpread}` : `+${Math.abs(analysis.recommendedSpread)}`}
+            <p className="text-xs text-muted-foreground mb-1">HOME</p>
+            <p className="text-sm font-bold text-foreground truncate">{analysis.homeTeam}</p>
+            <p className="text-xs text-muted-foreground">{analysis.homeRecord || "—"}</p>
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Moneyline</span>
+              <span className={cn("text-base font-bold num", analysis.homeMoneyline < 0 ? "text-green-400" : "text-primary")}>
+                {formatOdds(analysis.homeMoneyline)}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {(analysis.homeWinProbability * 100).toFixed(0)}% win chance
             </p>
           </button>
         </div>
-      )}
+      </div>
 
-      {/* Over/Under direction */}
-      {betType === "over_under" && (
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => setOverUnderSide("over")}
-            className={cn("p-3 rounded-xl border transition-all flex items-center gap-2",
-              overUnderSide === "over" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30"
-            )}
-          >
-            <ChevronUp className="w-4 h-4 text-green-400" />
+      {/* Other markets: spread + over/under */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Other Markets</p>
+        <div className="space-y-2">
+          {/* Spread row */}
+          {analysis.recommendedSpread != null && (
             <div>
-              <p className="text-sm font-bold text-foreground">Over {analysis.recommendedOverUnder}</p>
-              <p className="text-xs text-muted-foreground">-110</p>
+              <p className="text-xs text-muted-foreground mb-1.5">Point Spread</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setPick({ kind: "spread", team: "away" })}
+                  disabled={hasStarted}
+                  className={cn(
+                    "p-2.5 rounded-lg border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed",
+                    pick.kind === "spread" && pick.team === "away"
+                      ? "bg-primary/15 border-primary"
+                      : "bg-muted/20 border-border hover:border-primary/30"
+                  )}
+                >
+                  <p className="text-xs text-muted-foreground truncate">{analysis.awayTeam}</p>
+                  <p className="text-sm font-bold text-foreground num">
+                    {-analysis.recommendedSpread > 0 ? "+" : ""}{-analysis.recommendedSpread} <span className="text-xs text-muted-foreground">(-110)</span>
+                  </p>
+                </button>
+                <button
+                  onClick={() => setPick({ kind: "spread", team: "home" })}
+                  disabled={hasStarted}
+                  className={cn(
+                    "p-2.5 rounded-lg border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed",
+                    pick.kind === "spread" && pick.team === "home"
+                      ? "bg-primary/15 border-primary"
+                      : "bg-muted/20 border-border hover:border-primary/30"
+                  )}
+                >
+                  <p className="text-xs text-muted-foreground truncate">{analysis.homeTeam}</p>
+                  <p className="text-sm font-bold text-foreground num">
+                    {analysis.recommendedSpread > 0 ? "+" : ""}{analysis.recommendedSpread} <span className="text-xs text-muted-foreground">(-110)</span>
+                  </p>
+                </button>
+              </div>
             </div>
-          </button>
-          <button
-            onClick={() => setOverUnderSide("under")}
-            className={cn("p-3 rounded-xl border transition-all flex items-center gap-2",
-              overUnderSide === "under" ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-border hover:border-primary/30"
-            )}
-          >
-            <ChevronDown className="w-4 h-4 text-red-400" />
-            <div>
-              <p className="text-sm font-bold text-foreground">Under {analysis.recommendedOverUnder}</p>
-              <p className="text-xs text-muted-foreground">-110</p>
-            </div>
-          </button>
-        </div>
-      )}
+          )}
 
-      {/* Confidence & key factors */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <ConfidenceBadge confidence={analysis.confidence} />
-        </div>
-        <div className="space-y-1.5">
-          {analysis.keyFactors?.slice(0, 3).map((factor: string, i: number) => (
-            <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
-              <CheckCircle2 className="w-3.5 h-3.5 text-green-400 flex-shrink-0 mt-0.5" />
-              {factor}
+          {/* Over/Under row */}
+          {analysis.recommendedOverUnder != null && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1.5">Total Points ({analysis.recommendedOverUnder})</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setPick({ kind: "over_under", side: "over" })}
+                  disabled={hasStarted}
+                  className={cn(
+                    "p-2.5 rounded-lg border transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed",
+                    pick.kind === "over_under" && pick.side === "over"
+                      ? "bg-primary/15 border-primary"
+                      : "bg-muted/20 border-border hover:border-primary/30"
+                  )}
+                >
+                  <ChevronUp className="w-4 h-4 text-green-400" />
+                  <div className="text-left">
+                    <p className="text-xs font-bold text-foreground">Over {analysis.recommendedOverUnder}</p>
+                    <p className="text-xs text-muted-foreground">-110</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => setPick({ kind: "over_under", side: "under" })}
+                  disabled={hasStarted}
+                  className={cn(
+                    "p-2.5 rounded-lg border transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed",
+                    pick.kind === "over_under" && pick.side === "under"
+                      ? "bg-primary/15 border-primary"
+                      : "bg-muted/20 border-border hover:border-primary/30"
+                  )}
+                >
+                  <ChevronDown className="w-4 h-4 text-red-400" />
+                  <div className="text-left">
+                    <p className="text-xs font-bold text-foreground">Under {analysis.recommendedOverUnder}</p>
+                    <p className="text-xs text-muted-foreground">-110</p>
+                  </div>
+                </button>
+              </div>
             </div>
-          ))}
+          )}
         </div>
       </div>
 
-      {/* Analysis text */}
-      <div className="p-3 bg-muted/30 rounded-xl">
-        <p className="text-xs text-muted-foreground leading-relaxed">{analysis.analysis}</p>
-      </div>
-
-      {/* Stake input & bet button */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Stake:</span>
-          <div className="flex items-center gap-1">
-            {[10, 25, 50, 100, 250].map(amount => (
-              <button key={amount}
-                onClick={() => setStake(amount)}
-                className={cn("px-2.5 py-1 rounded-lg text-xs font-medium transition-all",
-                  stake === amount ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
-                )}>
-                ${amount}
-              </button>
+      {/* Analysis insights (collapsible-style, compact) */}
+      <details className="group">
+        <summary className="flex items-center justify-between cursor-pointer list-none">
+          <div className="flex items-center gap-2">
+            <BarChart2 className="w-4 h-4 text-muted-foreground" />
+            <span className="text-xs font-semibold text-muted-foreground">View Analysis</span>
+            <ConfidenceBadge confidence={analysis.confidence} />
+          </div>
+          <ChevronDown className="w-4 h-4 text-muted-foreground group-open:rotate-180 transition-transform" />
+        </summary>
+        <div className="mt-3 space-y-3">
+          <WinProbabilityBar
+            homeTeam={analysis.homeTeam}
+            awayTeam={analysis.awayTeam}
+            homeProb={analysis.homeWinProbability}
+            awayProb={analysis.awayWinProbability}
+          />
+          <div className="space-y-1.5">
+            {analysis.keyFactors?.slice(0, 3).map((factor: string, i: number) => (
+              <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+                <CheckCircle2 className="w-3.5 h-3.5 text-green-400 flex-shrink-0 mt-0.5" />
+                {factor}
+              </div>
             ))}
           </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">{analysis.analysis}</p>
+          <p className="text-[10px] text-muted-foreground/70 italic">{oddsLabel}</p>
         </div>
-        <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-xl">
-          <div className="flex-1">
-            <p className="text-xs text-muted-foreground">Win {(getWinProb() * 100).toFixed(0)}% chance</p>
-            <p className="text-sm font-bold text-foreground">Potential: ${calculatePayout().toFixed(2)}</p>
+      </details>
+
+      {/* Step 2: Bet slip */}
+      {!hasStarted && (
+        <div className="border-t border-border pt-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold">2</div>
+            <p className="text-sm font-semibold text-foreground">Your bet</p>
           </div>
-          <button
-            onClick={() => onPlaceBet({
-              gameId: analysis.gameId,
-              homeTeam: analysis.homeTeam,
-              awayTeam: analysis.awayTeam,
-              sport: analysis.sport,
-              betType,
-              selectedTeam: betType === "moneyline" ? selectedTeam :
-                            betType === "spread" ? (spreadSide === "home" ? analysis.homeTeam : analysis.awayTeam) :
-                            undefined,
-              amount: stake,
-              odds: getOdds(),
-              spread: betType === "spread" ? analysis.recommendedSpread : undefined,
-              overUnder: betType === "over_under" ? analysis.recommendedOverUnder : undefined,
-              isOver: betType === "over_under" ? overUnderSide === "over" : undefined,
-              winProbability: getWinProb(),
-            })}
-            className="btn-primary"
-          >
-            Place ${stake} Bet
-          </button>
+
+          {/* Bet slip summary */}
+          <div className="p-3 bg-primary/5 border border-primary/20 rounded-xl">
+            <p className="text-xs text-muted-foreground">You picked</p>
+            <p className="text-sm font-bold text-foreground">{pickDescription()}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Odds: <span className="font-semibold text-foreground num">{formatOdds(getOdds())}</span> · Win chance: <span className="font-semibold text-foreground">{(getWinProb() * 100).toFixed(0)}%</span>
+            </p>
+          </div>
+
+          {/* Stake chips */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-2">Stake</p>
+            <div className="grid grid-cols-5 gap-2">
+              {[10, 25, 50, 100, 250].map(amount => (
+                <button key={amount}
+                  onClick={() => setStake(amount)}
+                  className={cn("py-2 rounded-lg text-xs font-semibold transition-all border",
+                    stake === amount
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-muted/30 border-border text-muted-foreground hover:border-primary/30"
+                  )}>
+                  ${amount}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Potential payout + place bet */}
+          <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-xl">
+            <div className="flex-1">
+              <p className="text-xs text-muted-foreground">To win</p>
+              <p className="text-lg font-bold text-green-400 num">+${(calculatePayout() - stake).toFixed(2)}</p>
+              <p className="text-xs text-muted-foreground">Total payout: ${calculatePayout().toFixed(2)}</p>
+            </div>
+            <button
+              onClick={handlePlaceBet}
+              className="btn-primary whitespace-nowrap"
+            >
+              Place ${stake} Bet
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -530,12 +624,41 @@ function BetHistoryList({ bets, onCancel }: { bets: any[]; onCancel?: (betId: st
               </div>
 
               {/* Timestamps */}
-              <div className="flex items-center gap-3 text-xs text-muted-foreground/70">
+              <div className="flex items-center gap-3 text-xs text-muted-foreground/70 flex-wrap">
                 <span><Calendar className="inline w-3 h-3 mr-0.5" /> Placed {placedDate.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                {bet.gameStartTime && !settledDate && (
+                  <span>Game {new Date(bet.gameStartTime).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                )}
                 {settledDate && (
                   <span>Settled {settledDate.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
                 )}
               </div>
+
+              {/* Pending bet status message */}
+              {bet.status === "pending" && bet.gameStartTime && (() => {
+                const start = new Date(bet.gameStartTime).getTime();
+                const end = bet.gameEndTime ? new Date(bet.gameEndTime).getTime() : start + 3 * 60 * 60 * 1000;
+                const now = Date.now();
+                if (now < start) {
+                  return (
+                    <p className="text-xs text-yellow-400/80 italic">
+                      Waiting for game to start ({Math.max(0, Math.round((start - now) / 60000))}m)
+                    </p>
+                  );
+                }
+                if (now < end) {
+                  return (
+                    <p className="text-xs text-yellow-400/80 italic">
+                      Game in progress — will settle when finished
+                    </p>
+                  );
+                }
+                return (
+                  <p className="text-xs text-muted-foreground italic">
+                    Game finished — settlement pending
+                  </p>
+                );
+              })()}
 
               {bet.result && (
                 <p className={cn("text-xs font-medium",
@@ -599,17 +722,27 @@ export default function BettingApp() {
     const raw = scheduleData?.games as
       | { id: string; homeTeam: string; awayTeam: string; league: string; startTime?: string; status?: string }[]
       | undefined;
-    if (raw?.length) {
-      return raw.map((g) => ({
-        id: g.id,
-        home: g.homeTeam,
-        away: g.awayTeam,
-        league: g.league,
-        startTime: g.startTime,
-        status: g.status,
-      }));
-    }
-    return SPORT_GAMES[selectedSport] || [];
+    const now = Date.now();
+    const mapped: GameRow[] = raw?.length
+      ? raw.map((g) => ({
+          id: g.id,
+          home: g.homeTeam,
+          away: g.awayTeam,
+          league: g.league,
+          startTime: g.startTime,
+          status: g.status,
+        }))
+      : (SPORT_GAMES[selectedSport] || []);
+
+    // Only show upcoming games: not finished, and starting in the future
+    return mapped.filter((g) => {
+      if (g.status === "finished") return false;
+      if (g.startTime) {
+        const start = new Date(g.startTime).getTime();
+        if (!isNaN(start) && start <= now) return false; // already started or in the past
+      }
+      return true;
+    });
   }, [scheduleData, selectedSport]);
 
   const filteredGames = useMemo(() => {
@@ -843,7 +976,9 @@ export default function BettingApp() {
                 </button>
               ))}
               {!loadingSchedule && filteredGames.length === 0 && (
-                <p className="text-xs text-muted-foreground text-center py-4">No games match your search</p>
+                <p className="text-xs text-muted-foreground text-center py-4">
+                  {gameSearch.trim() ? "No games match your search" : "No upcoming games for this league"}
+                </p>
               )}
             </div>
           </div>
@@ -927,6 +1062,7 @@ export default function BettingApp() {
                 <MemoizedAnalysisPanel
                   key={analysis.gameId || `${selectedGame.home}-${selectedGame.away}`}
                   analysis={analysis}
+                  game={selectedGame}
                   onPlaceBet={handlePlaceBet}
                 />
               ) : null}
