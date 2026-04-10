@@ -257,7 +257,34 @@ export class BettingService {
   }
 
   getBets(userId: string): MockBet[] {
-    return getUserBets(userId);
+    const userBets = getUserBets(userId);
+    // Lazy settlement: settle any pending bets whose games should have finished
+    const now = Date.now();
+    for (const bet of userBets) {
+      if (bet.status === "pending" && bet.gameEndTime) {
+        if (new Date(bet.gameEndTime).getTime() <= now) {
+          this.settleBet(userId, bet.id);
+        }
+      }
+    }
+    return userBets;
+  }
+
+  /** Estimate when a game finishes based on sport */
+  private computeGameEndTime(startIso: string | undefined, sport: string): string | undefined {
+    if (!startIso) return undefined;
+    const start = new Date(startIso);
+    if (isNaN(start.getTime())) return undefined;
+    // Typical game durations in minutes
+    const durations: Record<string, number> = {
+      basketball: 150,
+      football: 210,
+      soccer: 120,
+      baseball: 180,
+      hockey: 150,
+    };
+    const minutes = durations[sport] || 180;
+    return new Date(start.getTime() + minutes * 60 * 1000).toISOString();
   }
 
   placeBet(userId: string, bet: Omit<MockBet, "id" | "placedAt" | "status" | "potentialPayout">): MockBet | { error: string } {
@@ -268,9 +295,19 @@ export class BettingService {
     if (bet.amount > 5000) return { error: "Maximum bet is $5,000" };
     if (bet.amount < 1) return { error: "Minimum bet is $1" };
 
+    // Validate game hasn't already started / finished
+    if (bet.gameStartTime) {
+      const start = new Date(bet.gameStartTime).getTime();
+      if (!isNaN(start) && start <= Date.now()) {
+        return { error: "Cannot bet on a game that has already started" };
+      }
+    }
+
     const potentialPayout = bet.odds > 0
       ? bet.amount + (bet.amount * bet.odds / 100)
       : bet.amount + (bet.amount / (Math.abs(bet.odds) / 100));
+
+    const gameEndTime = this.computeGameEndTime(bet.gameStartTime, bet.sport);
 
     const newBet: MockBet = {
       ...bet,
@@ -278,6 +315,7 @@ export class BettingService {
       status: "pending",
       potentialPayout: Math.round(potentialPayout * 100) / 100,
       placedAt: new Date().toISOString(),
+      gameEndTime,
     };
 
     // Deduct from balance
@@ -288,11 +326,6 @@ export class BettingService {
 
     const userBets = getUserBets(userId);
     userBets.push(newBet);
-
-    // Auto-settle after a delay (simulate game result)
-    setTimeout(() => {
-      this.settleBet(userId, newBet.id);
-    }, 5000 + Math.random() * 10000);
 
     return newBet;
   }
