@@ -212,7 +212,7 @@ export default function Onboarding() {
               <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
                 <Trophy className="w-8 h-8 text-primary" />
               </div>
-              <h2 className="text-2xl font-bold text-foreground">Welcome to Adams Sports</h2>
+              <h2 className="text-2xl font-bold text-foreground">Welcome to Aurzo Sports</h2>
               <p className="text-sm text-muted-foreground mt-2">
                 Let's personalize your experience. You can change any of this later in your Profile.
               </p>

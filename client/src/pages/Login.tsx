@@ -65,7 +65,7 @@ export default function Login() {
           <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center mb-4 shadow-lg shadow-primary/20">
             <Trophy className="w-7 h-7 text-primary-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Adams Sports</h1>
+          <h1 className="text-2xl font-bold text-foreground">Aurzo Sports</h1>
           <p className="text-sm text-muted-foreground mt-1">
             {mode === "login" ? "Sign in to your account" : "Create your account"}
           </p>
