@@ -15,6 +15,137 @@ import { useAuth } from "@/contexts/AuthContext";
 
 const MAX_ROSTER = 15;
 
+// Normalize player position to match lineup slot naming.
+// ESPN returns things like "DST", "P", "RP"; we map them to our canonical set.
+function normalizePosition(raw: string | undefined): string {
+  if (!raw) return "";
+  const p = raw.toUpperCase().split(/[\/,]/)[0].trim();
+  // NFL
+  if (p === "DST" || p === "D/ST" || p === "DEFENSE") return "DEF";
+  if (p === "PK") return "K";
+  // MLB
+  if (p === "P") return "SP"; // generic pitcher → starting pitcher (RP gets through as-is)
+  // NHL
+  if (p === "LEFT WING") return "LW";
+  if (p === "RIGHT WING") return "RW";
+  if (p === "CENTER") return "C";
+  if (p === "DEFENSE" || p === "DEFENCE" || p === "DEFENSEMAN") return "D";
+  if (p === "GOALIE" || p === "GOALTENDER") return "G";
+  // NBA
+  if (p === "GUARD") return "G";
+  if (p === "FORWARD") return "F";
+  if (p === "CENTER") return "C";
+  // Soccer
+  if (p === "GOALKEEPER") return "GK";
+  if (p === "DEFENDER" || p === "FULLBACK" || p === "CENTER-BACK") return "DEF";
+  if (p === "MIDFIELDER") return "MID";
+  if (p === "FORWARD" || p === "STRIKER" || p === "WINGER") return "FWD";
+  return p;
+}
+
+// Which player positions can fill a given lineup slot
+const SLOT_ELIGIBILITY: Record<string, string[]> = {
+  // NFL flex takes RB / WR / TE
+  FLEX: ["RB", "WR", "TE"],
+  // NBA guard / forward / util
+  G: ["PG", "SG"],
+  F: ["SF", "PF"],
+  UTIL: ["*"],
+  // Bench: accepts any position
+  BN: ["*"],
+  IR: ["*"],
+};
+
+function slotAccepts(slot: string, position: string): boolean {
+  if (!slot || !position) return false;
+  if (slot === position) return true;
+  const eligible = SLOT_ELIGIBILITY[slot];
+  if (!eligible) return false;
+  if (eligible.includes("*")) return true;
+  return eligible.includes(position);
+}
+
+/**
+ * Greedy slot-assignment validator: try to fit every roster player into the sport's
+ * lineup slots. Specific-position slots are filled before flex/bench, so the order of
+ * players doesn't cause spurious failures.
+ */
+function canFitRoster(roster: any[], sport: string): boolean {
+  const config = SPORT_CONFIG[sport];
+  if (!config) return true;
+  const slots = [...config.positions];
+  const players = roster.map(p => ({ id: p.id, pos: normalizePosition(p.position) }));
+
+  // Categorize slots by specificity
+  const specificSlotIdx: number[] = [];
+  const flexSlotIdx: number[] = [];
+  const wildcardSlotIdx: number[] = [];
+  slots.forEach((s, i) => {
+    if (SLOT_ELIGIBILITY[s]?.includes("*")) wildcardSlotIdx.push(i);
+    else if (SLOT_ELIGIBILITY[s]) flexSlotIdx.push(i);
+    else specificSlotIdx.push(i);
+  });
+
+  const used = new Set<number>();
+
+  // Pass 1: assign each player to a matching specific slot
+  for (const player of players) {
+    if (!player.pos) continue;
+    const idx = specificSlotIdx.find(i => !used.has(i) && slots[i] === player.pos);
+    if (idx !== undefined) {
+      used.add(idx);
+      player.id = ""; // mark as placed
+    }
+  }
+
+  // Pass 2: assign remaining players to flex slots (e.g. FLEX, G, F)
+  for (const player of players) {
+    if (!player.id) continue;
+    const idx = flexSlotIdx.find(i => !used.has(i) && slotAccepts(slots[i], player.pos));
+    if (idx !== undefined) {
+      used.add(idx);
+      player.id = "";
+    }
+  }
+
+  // Pass 3: assign remaining to wildcard slots (UTIL, BN, IR)
+  for (const player of players) {
+    if (!player.id) continue;
+    const idx = wildcardSlotIdx.find(i => !used.has(i));
+    if (idx !== undefined) {
+      used.add(idx);
+      player.id = "";
+    }
+  }
+
+  // If any player still has an id, they couldn't be placed
+  return !players.some(p => p.id);
+}
+
+/**
+ * Count how many players of a given position are allowed given the sport's lineup
+ * and current roster. Returns { current, max } where max is the theoretical cap.
+ */
+function positionCapacity(roster: any[], position: string, sport: string): { current: number; max: number } {
+  const config = SPORT_CONFIG[sport];
+  if (!config) return { current: 0, max: 99 };
+  const normPos = normalizePosition(position);
+  const current = roster.filter(p => normalizePosition(p.position) === normPos).length;
+
+  // Max = count of slots that accept this specific position
+  let max = 0;
+  for (const slot of config.positions) {
+    if (slot === normPos) max++;
+    else if (SLOT_ELIGIBILITY[slot]) {
+      const eligible = SLOT_ELIGIBILITY[slot];
+      if (eligible.includes("*") || eligible.includes(normPos)) max++;
+    }
+  }
+  return { current, max };
+}
+
+type AddResult = { ok: true } | { ok: false; reason: string };
+
 // Stores rosters as a nested map: { [sport]: player[] } keyed by user
 function useLocalRoster(userId: string, sport: string) {
   const storageKey = `fantasy_rosters_v2_${userId}`;
@@ -31,6 +162,7 @@ function useLocalRoster(userId: string, sport: string) {
   };
 
   const [allRosters, setAllRosters] = useState<Record<string, any[]>>(() => readAll());
+  const [lastError, setLastError] = useState<string | null>(null);
 
   // Re-read when user changes
   useEffect(() => {
@@ -45,16 +177,57 @@ function useLocalRoster(userId: string, sport: string) {
 
   const roster = allRosters[sport] || [];
 
-  const addPlayer = useCallback((player: any) => {
+  const checkCanAdd = useCallback((player: any): AddResult => {
+    const current = allRosters[sport] || [];
+    const config = SPORT_CONFIG[sport];
+    const maxSize = config ? config.positions.length : MAX_ROSTER;
+
+    if (current.some(p => p.id === player.id)) {
+      return { ok: false, reason: "Already on your roster" };
+    }
+    if (current.length >= maxSize) {
+      return { ok: false, reason: `Roster is full (${maxSize} players max)` };
+    }
+
+    // Position capacity check
+    const playerPos = normalizePosition(player.position);
+    if (playerPos && config) {
+      const { current: cur, max } = positionCapacity(current, player.position, sport);
+      if (cur >= max && max > 0) {
+        return {
+          ok: false,
+          reason: `${playerPos} slots are full (${cur}/${max}) — drop a ${playerPos} first`,
+        };
+      }
+    }
+
+    // Full slot-assignment check (handles FLEX/UTIL/BN compatibility)
+    if (!canFitRoster([...current, player], sport)) {
+      return {
+        ok: false,
+        reason: `No open slot for a ${playerPos || "this"} player`,
+      };
+    }
+
+    return { ok: true };
+  }, [allRosters, sport]);
+
+  const addPlayer = useCallback((player: any): AddResult => {
+    const result = checkCanAdd(player);
+    if (!result.ok) {
+      setLastError(result.reason);
+      return result;
+    }
+    setLastError(null);
     setAllRosters(prev => {
       const current = prev[sport] || [];
-      if (current.length >= MAX_ROSTER) return prev;
-      if (current.some(p => p.id === player.id)) return prev;
       return { ...prev, [sport]: [...current, player] };
     });
-  }, [sport]);
+    return { ok: true };
+  }, [sport, checkCanAdd]);
 
   const removePlayer = useCallback((playerId: string) => {
+    setLastError(null);
     setAllRosters(prev => {
       const current = prev[sport] || [];
       return { ...prev, [sport]: current.filter(p => p.id !== playerId) };
@@ -65,7 +238,9 @@ function useLocalRoster(userId: string, sport: string) {
     return roster.some(p => p.id === playerId);
   }, [roster]);
 
-  return { roster, addPlayer, removePlayer, isOnRoster };
+  const clearError = useCallback(() => setLastError(null), []);
+
+  return { roster, addPlayer, removePlayer, isOnRoster, checkCanAdd, lastError, clearError };
 }
 
 // Sport-specific roster positions and configurations
@@ -437,7 +612,20 @@ export default function FantasyApp() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
-  const { roster, addPlayer, removePlayer, isOnRoster } = useLocalRoster(userId, selectedSport);
+  const { roster, addPlayer, removePlayer, isOnRoster, checkCanAdd, lastError, clearError } = useLocalRoster(userId, selectedSport);
+
+  // Max roster size is the number of slots in the sport's lineup
+  const rosterMaxSize = useMemo(() => {
+    return SPORT_CONFIG[selectedSport]?.positions.length || MAX_ROSTER;
+  }, [selectedSport]);
+
+  // Auto-clear add error after 4 seconds
+  useEffect(() => {
+    if (lastError) {
+      const t = setTimeout(clearError, 4000);
+      return () => clearTimeout(t);
+    }
+  }, [lastError, clearError]);
 
   useEffect(() => {
     if (!userSports.some(s => s.id === selectedSport)) {
@@ -548,7 +736,7 @@ export default function FantasyApp() {
             <div className="flex items-center gap-3">
               <div className="text-right">
                 <p className="text-xs text-muted-foreground">Roster</p>
-                <p className="text-sm font-bold text-foreground">{roster.length}/{MAX_ROSTER}</p>
+                <p className="text-sm font-bold text-foreground">{roster.length}/{rosterMaxSize}</p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-muted-foreground">Total Proj</p>
@@ -569,11 +757,11 @@ export default function FantasyApp() {
           <div className="relative h-2 bg-muted rounded-full overflow-hidden">
             <div
               className="absolute left-0 top-0 h-full bg-primary rounded-full"
-              style={{ width: `${(roster.length / MAX_ROSTER) * 100}%` }}
+              style={{ width: `${(roster.length / rosterMaxSize) * 100}%` }}
             />
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            {roster.length} of {MAX_ROSTER} roster slots filled
+            {roster.length} of {rosterMaxSize} roster slots filled
           </p>
         </div>
       )}
@@ -584,7 +772,7 @@ export default function FantasyApp() {
           {/* Tab nav */}
           <div className="scroll-row">
             {[
-              { key: "roster", label: `My Roster (${roster.length}/${MAX_ROSTER})`, Icon: Trophy },
+              { key: "roster", label: `My Roster (${roster.length}/${rosterMaxSize})`, Icon: Trophy },
               { key: "players", label: "Players", Icon: Users },
               { key: "waiver", label: "Waiver Wire", Icon: Target },
               { key: "injuries", label: "Injuries", Icon: AlertCircle },
@@ -606,6 +794,17 @@ export default function FantasyApp() {
             ))}
           </div>
 
+          {/* Add error banner */}
+          {lastError && (
+            <div className="flex items-center gap-2 p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl animate-fade-in">
+              <AlertCircle className="w-4 h-4 text-orange-400 flex-shrink-0" />
+              <p className="text-xs text-orange-400 flex-1">{lastError}</p>
+              <button onClick={clearError} className="text-xs text-orange-400/70 hover:text-orange-400">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Search */}
           {(activeTab === "players" || activeTab === "roster") && (
             <div className="relative">
@@ -624,51 +823,80 @@ export default function FantasyApp() {
           {activeTab === "roster" && (
             <div className="space-y-3">
               {/* Sport-specific lineup/positions display */}
-              {roster.length > 0 && SPORT_CONFIG[selectedSport] && (
-                <div className="glass-card p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Starting Lineup</p>
-                      <p className="text-xs text-muted-foreground/70 mt-0.5">{SPORT_CONFIG[selectedSport].scoringFormat} · {SPORT_CONFIG[selectedSport].positions.length} slots</p>
+              {roster.length > 0 && SPORT_CONFIG[selectedSport] && (() => {
+                const config = SPORT_CONFIG[selectedSport];
+                // Greedy slot assignment mirroring canFitRoster
+                const slots = config.positions;
+                const assignments: (any | null)[] = slots.map(() => null);
+                const placed = new Set<string>();
+
+                // Pass 1: exact matches
+                slots.forEach((slot, i) => {
+                  if (SLOT_ELIGIBILITY[slot]) return;
+                  const match = roster.find((p: any) => !placed.has(p.id) && normalizePosition(p.position) === slot);
+                  if (match) { assignments[i] = match; placed.add(match.id); }
+                });
+                // Pass 2: flex slots
+                slots.forEach((slot, i) => {
+                  if (!SLOT_ELIGIBILITY[slot] || SLOT_ELIGIBILITY[slot].includes("*")) return;
+                  const match = roster.find((p: any) => !placed.has(p.id) && slotAccepts(slot, normalizePosition(p.position)));
+                  if (match) { assignments[i] = match; placed.add(match.id); }
+                });
+                // Pass 3: wildcards (UTIL/BN/IR)
+                slots.forEach((slot, i) => {
+                  if (!SLOT_ELIGIBILITY[slot] || !SLOT_ELIGIBILITY[slot].includes("*")) return;
+                  const match = roster.find((p: any) => !placed.has(p.id));
+                  if (match) { assignments[i] = match; placed.add(match.id); }
+                });
+
+                return (
+                  <div className="glass-card p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Starting Lineup</p>
+                        <p className="text-xs text-muted-foreground/70 mt-0.5">{config.scoringFormat} · {slots.length} slots · {placed.size}/{slots.length} filled</p>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      {slots.map((pos, i) => {
+                        const assigned = assignments[i];
+                        return (
+                          <div
+                            key={`${pos}-${i}`}
+                            className={cn(
+                              "flex items-center gap-3 px-3 py-2 rounded-lg border",
+                              assigned
+                                ? "bg-primary/10 border-primary/30"
+                                : "bg-muted/20 border-dashed border-border"
+                            )}
+                          >
+                            <span className="text-xs font-bold text-muted-foreground w-10 flex-shrink-0">{pos}</span>
+                            {assigned ? (
+                              <>
+                                <span className="text-sm font-medium text-foreground flex-1 truncate">{assigned.name}</span>
+                                <span className="text-xs text-muted-foreground flex-shrink-0">{normalizePosition(assigned.position)} · {assigned.team?.split(" ").slice(-1)[0]}</span>
+                              </>
+                            ) : (
+                              <span className="text-xs text-muted-foreground italic">empty slot</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Stat categories */}
+                    <div className="mt-3 pt-3 border-t border-border">
+                      <p className="text-xs font-semibold text-muted-foreground mb-2">Scoring Categories</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {config.statCategories.map(({ key, label }) => (
+                          <span key={key} className="px-2 py-0.5 bg-muted/50 rounded text-xs text-muted-foreground">
+                            <span className="font-bold text-foreground">{key}</span> {label}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {SPORT_CONFIG[selectedSport].positions.map((pos, i) => {
-                      // Try to find a player matching this position
-                      const assigned = roster.find((p: any, idx: number) => {
-                        const alreadyFilled = SPORT_CONFIG[selectedSport].positions.slice(0, i)
-                          .some((pp, ii) => ii < i && roster.find((q: any) => q.id === p.id && q.position?.includes(pp)));
-                        return !alreadyFilled && p.position?.toUpperCase().includes(pos) && !roster.slice(0, i).some((r: any) => r.id === p.id);
-                      });
-                      return (
-                        <div
-                          key={`${pos}-${i}`}
-                          className={cn(
-                            "px-2.5 py-1 rounded-lg text-xs font-semibold border",
-                            assigned
-                              ? "bg-primary/15 border-primary/40 text-foreground"
-                              : "bg-muted/30 border-dashed border-border text-muted-foreground"
-                          )}
-                        >
-                          {pos}
-                          {assigned && <span className="ml-1 opacity-70">{assigned.name?.split(" ").slice(-1)[0]}</span>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {/* Stat categories */}
-                  <div className="mt-3 pt-3 border-t border-border">
-                    <p className="text-xs font-semibold text-muted-foreground mb-2">Scoring Categories</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {SPORT_CONFIG[selectedSport].statCategories.map(({ key, label }) => (
-                        <span key={key} className="px-2 py-0.5 bg-muted/50 rounded text-xs text-muted-foreground">
-                          <span className="font-bold text-foreground">{key}</span> {label}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {rosterFiltered.map((p: any) => (
                 <MemoizedPlayerCard key={p.id} player={p} compact onRemove={removePlayer} onSelect={setSelectedPlayer} />
