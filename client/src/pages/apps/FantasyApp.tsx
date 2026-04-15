@@ -13,56 +13,136 @@ import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 
-const MAX_ROSTER = 15;
+// -----------------------------------------------------------------------------
+// Sport-scoped position normalization & slot eligibility.
+//
+// The earlier implementation used one flat map for all sports and a single
+// `normalizePosition` that ignored sport. That caused real bugs:
+//   * NHL goalies and NBA guards both resolved to "G".
+//   * MLB outfielders (LF/CF/RF) could never fill an "OF" slot.
+//   * A player from one sport could be dropped into another sport's roster if
+//     the position tokens happened to match.
+// Everything below is now keyed by `SportId` so each sport has its own rules.
+// -----------------------------------------------------------------------------
 
-// Normalize player position to match lineup slot naming.
-// ESPN returns things like "DST", "P", "RP"; we map them to our canonical set.
-function normalizePosition(raw: string | undefined): string {
-  if (!raw) return "";
-  const p = raw.toUpperCase().split(/[\/,]/)[0].trim();
-  // NFL
-  if (p === "DST" || p === "D/ST" || p === "DEFENSE") return "DEF";
-  if (p === "PK") return "K";
-  // MLB
-  if (p === "P") return "SP"; // generic pitcher → starting pitcher (RP gets through as-is)
-  // NHL
-  if (p === "LEFT WING") return "LW";
-  if (p === "RIGHT WING") return "RW";
-  if (p === "CENTER") return "C";
-  if (p === "DEFENSE" || p === "DEFENCE" || p === "DEFENSEMAN") return "D";
-  if (p === "GOALIE" || p === "GOALTENDER") return "G";
-  // NBA
-  if (p === "GUARD") return "G";
-  if (p === "FORWARD") return "F";
-  if (p === "CENTER") return "C";
-  // Soccer
-  if (p === "GOALKEEPER") return "GK";
-  if (p === "DEFENDER" || p === "FULLBACK" || p === "CENTER-BACK") return "DEF";
-  if (p === "MIDFIELDER") return "MID";
-  if (p === "FORWARD" || p === "STRIKER" || p === "WINGER") return "FWD";
-  return p;
-}
+type SportKey = "basketball" | "football" | "soccer" | "baseball" | "hockey";
 
-// Which player positions can fill a given lineup slot
-const SLOT_ELIGIBILITY: Record<string, string[]> = {
-  // NFL flex takes RB / WR / TE
-  FLEX: ["RB", "WR", "TE"],
-  // NBA guard / forward / util
-  G: ["PG", "SG"],
-  F: ["SF", "PF"],
-  UTIL: ["*"],
-  // Bench: accepts any position
-  BN: ["*"],
-  IR: ["*"],
+// Raw ESPN/free-text position → canonical token, per sport.
+const POSITION_ALIASES: Record<SportKey, Record<string, string>> = {
+  basketball: {
+    G: "G", GUARD: "G",
+    F: "F", FORWARD: "F",
+    C: "C", CENTER: "C",
+    PG: "PG", "POINT GUARD": "PG",
+    SG: "SG", "SHOOTING GUARD": "SG",
+    SF: "SF", "SMALL FORWARD": "SF",
+    PF: "PF", "POWER FORWARD": "PF",
+  },
+  football: {
+    QB: "QB", QUARTERBACK: "QB",
+    RB: "RB", "RUNNING BACK": "RB", HB: "RB", FB: "RB",
+    WR: "WR", "WIDE RECEIVER": "WR",
+    TE: "TE", "TIGHT END": "TE",
+    K: "K", PK: "K", KICKER: "K", P: "K", PUNTER: "K",
+    DEF: "DEF", DST: "DEF", "D/ST": "DEF", DEFENSE: "DEF",
+  },
+  soccer: {
+    GK: "GK", GOALKEEPER: "GK", G: "GK",
+    DEF: "DEF", D: "DEF", DEFENDER: "DEF", FULLBACK: "DEF",
+    "CENTER-BACK": "DEF", "CENTRE-BACK": "DEF", CB: "DEF", FB: "DEF",
+    MID: "MID", M: "MID", MIDFIELDER: "MID", CM: "MID", DM: "MID", AM: "MID",
+    FWD: "FWD", F: "FWD", FORWARD: "FWD", STRIKER: "FWD",
+    WINGER: "FWD", ST: "FWD", LW: "FWD", RW: "FWD", W: "FWD",
+  },
+  baseball: {
+    // Hitters
+    C: "C", CATCHER: "C",
+    "1B": "1B", "FIRST BASE": "1B", FIRSTBASEMAN: "1B",
+    "2B": "2B", "SECOND BASE": "2B", SECONDBASEMAN: "2B",
+    "3B": "3B", "THIRD BASE": "3B", THIRDBASEMAN: "3B",
+    SS: "SS", SHORTSTOP: "SS",
+    OF: "OF", LF: "OF", CF: "OF", RF: "OF",
+    "LEFT FIELD": "OF", "CENTER FIELD": "OF", "RIGHT FIELD": "OF",
+    OUTFIELDER: "OF", OUTFIELD: "OF",
+    DH: "DH", "DESIGNATED HITTER": "DH",
+    // Pitchers
+    SP: "SP", "STARTING PITCHER": "SP", STARTER: "SP",
+    RP: "RP", "RELIEF PITCHER": "RP", RELIEVER: "RP", CP: "RP", CLOSER: "RP",
+    P: "SP", PITCHER: "SP", // generic pitcher → SP by default
+  },
+  hockey: {
+    C: "C", CENTER: "C", CENTRE: "C",
+    LW: "LW", "LEFT WING": "LW", "LEFT WINGER": "LW",
+    RW: "RW", "RIGHT WING": "RW", "RIGHT WINGER": "RW",
+    D: "D", DEFENSE: "D", DEFENCE: "D", DEFENSEMAN: "D", DEFENCEMAN: "D",
+    G: "G", GOALIE: "G", GOALTENDER: "G",
+  },
 };
 
-function slotAccepts(slot: string, position: string): boolean {
-  if (!slot || !position) return false;
-  if (slot === position) return true;
-  const eligible = SLOT_ELIGIBILITY[slot];
-  if (!eligible) return false;
-  if (eligible.includes("*")) return true;
-  return eligible.includes(position);
+// Which player positions fill a given lineup slot, scoped per sport.
+// "*" means the slot accepts any canonical position for that sport.
+const SLOT_ELIGIBILITY: Record<SportKey, Record<string, string[]>> = {
+  basketball: {
+    PG: ["PG"], SG: ["SG"], SF: ["SF"], PF: ["PF"], C: ["C"],
+    G: ["PG", "SG", "G"],          // NBA guard slot
+    F: ["SF", "PF", "F"],          // NBA forward slot
+    UTIL: ["*"],
+    BN: ["*"], IR: ["*"],
+  },
+  football: {
+    QB: ["QB"], RB: ["RB"], WR: ["WR"], TE: ["TE"],
+    K: ["K"], DEF: ["DEF"],
+    FLEX: ["RB", "WR", "TE"],
+    SUPERFLEX: ["QB", "RB", "WR", "TE"],
+    BN: ["*"], IR: ["*"],
+  },
+  soccer: {
+    GK: ["GK"], DEF: ["DEF"], MID: ["MID"], FWD: ["FWD"],
+    UTIL: ["*"],
+    BN: ["*"], IR: ["*"],
+  },
+  baseball: {
+    C: ["C"], "1B": ["1B"], "2B": ["2B"], "3B": ["3B"], SS: ["SS"],
+    OF: ["OF"], DH: ["*"],
+    SP: ["SP"], RP: ["RP"], P: ["SP", "RP"],
+    UTIL: ["*"],
+    BN: ["*"], IR: ["*"],
+  },
+  hockey: {
+    C: ["C"], LW: ["LW"], RW: ["RW"], D: ["D"], G: ["G"],
+    // hockey "F" (forward) slot — optional, only used if a config exposes it
+    F: ["C", "LW", "RW"],
+    UTIL: ["*"],
+    BN: ["*"], IR: ["*"],
+  },
+};
+
+function isSportKey(s: string | undefined): s is SportKey {
+  return !!s && Object.prototype.hasOwnProperty.call(POSITION_ALIASES, s);
+}
+
+/**
+ * Normalize a raw position string to the sport's canonical token.
+ * Returns "" if the position cannot be mapped for that sport.
+ */
+function normalizePosition(raw: string | undefined, sport: string): string {
+  if (!raw || !isSportKey(sport)) return "";
+  const aliases = POSITION_ALIASES[sport];
+  const token = raw.toUpperCase().split(/[\/,|]/)[0].trim();
+  if (!token) return "";
+  if (aliases[token]) return aliases[token];
+  // Fall back to literal match if it's already a canonical token
+  const canon = new Set(Object.values(aliases));
+  if (canon.has(token)) return token;
+  return "";
+}
+
+function slotAccepts(slot: string, position: string, sport: string): boolean {
+  if (!slot || !position || !isSportKey(sport)) return false;
+  const rules = SLOT_ELIGIBILITY[sport][slot];
+  if (!rules) return false;
+  if (rules.includes("*")) return true;
+  return rules.includes(position);
 }
 
 /**
@@ -71,19 +151,26 @@ function slotAccepts(slot: string, position: string): boolean {
  * players doesn't cause spurious failures.
  */
 function canFitRoster(roster: any[], sport: string): boolean {
+  if (!isSportKey(sport)) return false;
   const config = SPORT_CONFIG[sport];
-  if (!config) return true;
+  if (!config) return false;
   const slots = [...config.positions];
-  const players = roster.map(p => ({ id: p.id, pos: normalizePosition(p.position) }));
+  const players = roster.map(p => ({
+    id: p.id,
+    pos: normalizePosition(p.position, sport),
+  }));
 
-  // Categorize slots by specificity
+  // Categorize slots by specificity (per sport)
+  const rules = SLOT_ELIGIBILITY[sport];
   const specificSlotIdx: number[] = [];
   const flexSlotIdx: number[] = [];
   const wildcardSlotIdx: number[] = [];
   slots.forEach((s, i) => {
-    if (SLOT_ELIGIBILITY[s]?.includes("*")) wildcardSlotIdx.push(i);
-    else if (SLOT_ELIGIBILITY[s]) flexSlotIdx.push(i);
-    else specificSlotIdx.push(i);
+    const r = rules[s];
+    if (!r) { specificSlotIdx.push(i); return; }
+    if (r.includes("*")) wildcardSlotIdx.push(i);
+    else if (r.length === 1 && r[0] === s) specificSlotIdx.push(i);
+    else flexSlotIdx.push(i);
   });
 
   const used = new Set<number>();
@@ -98,10 +185,11 @@ function canFitRoster(roster: any[], sport: string): boolean {
     }
   }
 
-  // Pass 2: assign remaining players to flex slots (e.g. FLEX, G, F)
+  // Pass 2: assign remaining players to flex slots (e.g. FLEX, NBA G/F)
   for (const player of players) {
     if (!player.id) continue;
-    const idx = flexSlotIdx.find(i => !used.has(i) && slotAccepts(slots[i], player.pos));
+    if (!player.pos) continue;
+    const idx = flexSlotIdx.find(i => !used.has(i) && slotAccepts(slots[i], player.pos, sport));
     if (idx !== undefined) {
       used.add(idx);
       player.id = "";
@@ -127,30 +215,34 @@ function canFitRoster(roster: any[], sport: string): boolean {
  * and current roster. Returns { current, max } where max is the theoretical cap.
  */
 function positionCapacity(roster: any[], position: string, sport: string): { current: number; max: number } {
+  if (!isSportKey(sport)) return { current: 0, max: 0 };
   const config = SPORT_CONFIG[sport];
-  if (!config) return { current: 0, max: 99 };
-  const normPos = normalizePosition(position);
-  const current = roster.filter(p => normalizePosition(p.position) === normPos).length;
+  if (!config) return { current: 0, max: 0 };
+  const normPos = normalizePosition(position, sport);
+  if (!normPos) return { current: 0, max: 0 };
+  const current = roster.filter(p => normalizePosition(p.position, sport) === normPos).length;
 
-  // Max = count of slots that accept this specific position
+  // Max = count of slots that accept this specific position (including wildcards)
+  const rules = SLOT_ELIGIBILITY[sport];
   let max = 0;
   for (const slot of config.positions) {
-    if (slot === normPos) max++;
-    else if (SLOT_ELIGIBILITY[slot]) {
-      const eligible = SLOT_ELIGIBILITY[slot];
-      if (eligible.includes("*") || eligible.includes(normPos)) max++;
-    }
+    const r = rules[slot];
+    if (!r) { if (slot === normPos) max++; continue; }
+    if (r.includes("*")) max++;
+    else if (r.includes(normPos)) max++;
   }
   return { current, max };
 }
 
 type AddResult = { ok: true } | { ok: false; reason: string };
 
-// Stores rosters as a nested map: { [sport]: player[] } keyed by user
+// Stores rosters as a nested map: { [sport]: player[] } keyed by user.
+// `userId` must be a real authenticated id; pass "" to disable persistence.
 function useLocalRoster(userId: string, sport: string) {
-  const storageKey = `fantasy_rosters_v2_${userId}`;
+  const storageKey = userId ? `fantasy_rosters_v2_${userId}` : "";
 
-  const readAll = (): Record<string, any[]> => {
+  const readAll = useCallback((): Record<string, any[]> => {
+    if (!storageKey) return {};
     try {
       const raw = localStorage.getItem(storageKey);
       if (!raw) return {};
@@ -159,7 +251,7 @@ function useLocalRoster(userId: string, sport: string) {
     } catch {
       return {};
     }
-  };
+  }, [storageKey]);
 
   const [allRosters, setAllRosters] = useState<Record<string, any[]>>(() => readAll());
   const [lastError, setLastError] = useState<string | null>(null);
@@ -167,20 +259,55 @@ function useLocalRoster(userId: string, sport: string) {
   // Re-read when user changes
   useEffect(() => {
     setAllRosters(readAll());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey]);
+  }, [readAll]);
 
   // Persist whenever allRosters changes
   useEffect(() => {
-    try { localStorage.setItem(storageKey, JSON.stringify(allRosters)); } catch {}
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(allRosters));
+    } catch (err) {
+      // Quota or disabled storage — surface so the UI can react
+      setLastError("Could not save roster to browser storage");
+    }
   }, [allRosters, storageKey]);
+
+  // Re-validate the loaded roster when sport changes. If a previously-stored
+  // roster can't fit the current lineup (e.g. schema changed, or someone
+  // tampered with localStorage) we surface a warning instead of silently
+  // letting the user operate on an invalid roster.
+  useEffect(() => {
+    if (!isSportKey(sport)) return;
+    const current = allRosters[sport] || [];
+    if (current.length === 0) return;
+    // Any player whose sport is wrong, or any unknown position
+    const wrongSport = current.find((p: any) => p.sport && p.sport !== sport);
+    if (wrongSport) {
+      setLastError(`Stored roster contains a ${wrongSport.sport} player — use "Reset roster" to fix`);
+      return;
+    }
+    if (!canFitRoster(current, sport)) {
+      setLastError("Stored roster doesn't fit the current lineup — use \"Reset roster\" to fix");
+    }
+  }, [sport, allRosters]);
 
   const roster = allRosters[sport] || [];
 
   const checkCanAdd = useCallback((player: any): AddResult => {
-    const current = allRosters[sport] || [];
+    if (!userId) return { ok: false, reason: "Sign in to build a roster" };
+    if (!isSportKey(sport)) return { ok: false, reason: `Unknown sport: ${sport}` };
     const config = SPORT_CONFIG[sport];
-    const maxSize = config ? config.positions.length : MAX_ROSTER;
+    if (!config) return { ok: false, reason: `No lineup configured for ${sport}` };
+
+    // Cross-sport guard: a FantasyPlayer carries a `sport` field — if it
+    // doesn't match the current sport, refuse. This catches stale cached
+    // results from a previous sport tab.
+    if (player?.sport && player.sport !== sport) {
+      return { ok: false, reason: `That player is a ${player.sport} player, not ${sport}` };
+    }
+
+    const current = allRosters[sport] || [];
+    const maxSize = config.positions.length;
 
     if (current.some(p => p.id === player.id)) {
       return { ok: false, reason: "Already on your roster" };
@@ -189,28 +316,38 @@ function useLocalRoster(userId: string, sport: string) {
       return { ok: false, reason: `Roster is full (${maxSize} players max)` };
     }
 
-    // Position capacity check
-    const playerPos = normalizePosition(player.position);
-    if (playerPos && config) {
-      const { current: cur, max } = positionCapacity(current, player.position, sport);
-      if (cur >= max && max > 0) {
-        return {
-          ok: false,
-          reason: `${playerPos} slots are full (${cur}/${max}) — drop a ${playerPos} first`,
-        };
-      }
+    // Position must map cleanly for this sport.
+    const playerPos = normalizePosition(player.position, sport);
+    if (!playerPos) {
+      return {
+        ok: false,
+        reason: `Position "${player.position || "unknown"}" isn't valid for ${sport}`,
+      };
+    }
+
+    // Position capacity: no more players of this kind than there are slots
+    // (including wildcards) that can hold them.
+    const { current: cur, max } = positionCapacity(current, player.position, sport);
+    if (max === 0) {
+      return { ok: false, reason: `${playerPos} has no slot in this lineup` };
+    }
+    if (cur >= max) {
+      return {
+        ok: false,
+        reason: `${playerPos} slots are full (${cur}/${max}) — drop a ${playerPos} first`,
+      };
     }
 
     // Full slot-assignment check (handles FLEX/UTIL/BN compatibility)
     if (!canFitRoster([...current, player], sport)) {
       return {
         ok: false,
-        reason: `No open slot for a ${playerPos || "this"} player`,
+        reason: `No open slot for a ${playerPos} player`,
       };
     }
 
     return { ok: true };
-  }, [allRosters, sport]);
+  }, [allRosters, sport, userId]);
 
   const addPlayer = useCallback((player: any): AddResult => {
     const result = checkCanAdd(player);
@@ -234,13 +371,27 @@ function useLocalRoster(userId: string, sport: string) {
     });
   }, [sport]);
 
+  const resetSportRoster = useCallback(() => {
+    setLastError(null);
+    setAllRosters(prev => ({ ...prev, [sport]: [] }));
+  }, [sport]);
+
   const isOnRoster = useCallback((playerId: string) => {
     return roster.some(p => p.id === playerId);
   }, [roster]);
 
   const clearError = useCallback(() => setLastError(null), []);
 
-  return { roster, addPlayer, removePlayer, isOnRoster, checkCanAdd, lastError, clearError };
+  return {
+    roster,
+    addPlayer,
+    removePlayer,
+    resetSportRoster,
+    isOnRoster,
+    checkCanAdd,
+    lastError,
+    clearError,
+  };
 }
 
 // Sport-specific roster positions and configurations
@@ -605,18 +756,24 @@ function TradeAnalyzer({ sportKey }: { sportKey: string }) {
 export default function FantasyApp() {
   const { user } = useAuth();
   const { preferences } = useUserPreferences();
-  const userId = user?.id || "default";
+  // Do not fall back to a shared "default" user — unauthenticated users must
+  // not share a single global roster, so we pass "" to disable persistence.
+  const userId = user?.id || "";
   const userSports = useMemo(() => getUserAppSports(preferences.favoriteSports), [preferences.favoriteSports]);
   const [selectedSport, setSelectedSport] = useState(userSports[0]?.id || "basketball");
   const [activeTab, setActiveTab] = useState<"roster" | "players" | "waiver" | "injuries" | "trade">("roster");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
-  const { roster, addPlayer, removePlayer, isOnRoster, checkCanAdd, lastError, clearError } = useLocalRoster(userId, selectedSport);
+  const {
+    roster, addPlayer, removePlayer, resetSportRoster,
+    isOnRoster, checkCanAdd, lastError, clearError,
+  } = useLocalRoster(userId, selectedSport);
 
-  // Max roster size is the number of slots in the sport's lineup
+  // Max roster size is the number of slots in the sport's lineup.
+  // Every sport we render is guaranteed to have a config entry.
   const rosterMaxSize = useMemo(() => {
-    return SPORT_CONFIG[selectedSport]?.positions.length || MAX_ROSTER;
+    return SPORT_CONFIG[selectedSport]?.positions.length ?? 0;
   }, [selectedSport]);
 
   // Auto-clear add error after 4 seconds
@@ -822,29 +979,43 @@ export default function FantasyApp() {
           {/* Roster */}
           {activeTab === "roster" && (
             <div className="space-y-3">
+              {!userId && (
+                <div className="glass-card p-4 border-yellow-500/30 bg-yellow-500/5">
+                  <p className="text-sm text-yellow-300 font-medium">Sign in to build a roster</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Rosters are saved per user. Without an account, changes can't be
+                    persisted.
+                  </p>
+                </div>
+              )}
               {/* Sport-specific lineup/positions display */}
-              {roster.length > 0 && SPORT_CONFIG[selectedSport] && (() => {
-                const config = SPORT_CONFIG[selectedSport];
+              {roster.length > 0 && isSportKey(selectedSport) && SPORT_CONFIG[selectedSport] && (() => {
+                const sport = selectedSport as SportKey;
+                const config = SPORT_CONFIG[sport];
+                const rules = SLOT_ELIGIBILITY[sport];
                 // Greedy slot assignment mirroring canFitRoster
                 const slots = config.positions;
                 const assignments: (any | null)[] = slots.map(() => null);
                 const placed = new Set<string>();
 
-                // Pass 1: exact matches
+                // Pass 1: exact matches — slots whose only eligibility is themselves
                 slots.forEach((slot, i) => {
-                  if (SLOT_ELIGIBILITY[slot]) return;
-                  const match = roster.find((p: any) => !placed.has(p.id) && normalizePosition(p.position) === slot);
+                  const r = rules[slot];
+                  if (r && !(r.length === 1 && r[0] === slot)) return;
+                  const match = roster.find((p: any) => !placed.has(p.id) && normalizePosition(p.position, sport) === slot);
                   if (match) { assignments[i] = match; placed.add(match.id); }
                 });
-                // Pass 2: flex slots
+                // Pass 2: flex slots (accept multiple positions but not everything)
                 slots.forEach((slot, i) => {
-                  if (!SLOT_ELIGIBILITY[slot] || SLOT_ELIGIBILITY[slot].includes("*")) return;
-                  const match = roster.find((p: any) => !placed.has(p.id) && slotAccepts(slot, normalizePosition(p.position)));
+                  const r = rules[slot];
+                  if (!r || r.includes("*") || (r.length === 1 && r[0] === slot)) return;
+                  const match = roster.find((p: any) => !placed.has(p.id) && slotAccepts(slot, normalizePosition(p.position, sport), sport));
                   if (match) { assignments[i] = match; placed.add(match.id); }
                 });
                 // Pass 3: wildcards (UTIL/BN/IR)
                 slots.forEach((slot, i) => {
-                  if (!SLOT_ELIGIBILITY[slot] || !SLOT_ELIGIBILITY[slot].includes("*")) return;
+                  const r = rules[slot];
+                  if (!r || !r.includes("*")) return;
                   const match = roster.find((p: any) => !placed.has(p.id));
                   if (match) { assignments[i] = match; placed.add(match.id); }
                 });
@@ -856,6 +1027,16 @@ export default function FantasyApp() {
                         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Starting Lineup</p>
                         <p className="text-xs text-muted-foreground/70 mt-0.5">{config.scoringFormat} · {slots.length} slots · {placed.size}/{slots.length} filled</p>
                       </div>
+                      <button
+                        onClick={() => {
+                          if (confirm(`Reset your ${sport} roster? This cannot be undone.`)) {
+                            resetSportRoster();
+                          }
+                        }}
+                        className="text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
+                      >
+                        Reset roster
+                      </button>
                     </div>
                     <div className="space-y-1.5">
                       {slots.map((pos, i) => {
@@ -874,7 +1055,7 @@ export default function FantasyApp() {
                             {assigned ? (
                               <>
                                 <span className="text-sm font-medium text-foreground flex-1 truncate">{assigned.name}</span>
-                                <span className="text-xs text-muted-foreground flex-shrink-0">{normalizePosition(assigned.position)} · {assigned.team?.split(" ").slice(-1)[0]}</span>
+                                <span className="text-xs text-muted-foreground flex-shrink-0">{normalizePosition(assigned.position, selectedSport) || assigned.position} · {assigned.team?.split(" ").slice(-1)[0]}</span>
                               </>
                             ) : (
                               <span className="text-xs text-muted-foreground italic">empty slot</span>
