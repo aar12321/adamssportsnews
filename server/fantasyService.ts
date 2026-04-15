@@ -1,4 +1,9 @@
 import type { FantasyPlayer, FantasyTeam, TradeAnalysis, WaiverTarget, PlayerStats } from "@shared/schema";
+import {
+  validateRosterAddition,
+  canFitFantasyRoster,
+  type RosterValidationResult,
+} from "@shared/fantasyRules";
 
 // Mock player database with realistic data
 const playerDatabase: FantasyPlayer[] = [
@@ -258,6 +263,32 @@ export class FantasyService {
     const seen = new Set(fromEspn.map((p) => p.name.toLowerCase()));
     const rest = local.filter((p) => !seen.has(p.name.toLowerCase()));
     return [...fromEspn, ...rest];
+  }
+
+  /**
+   * Server-side mirror of the client's roster validation. The client is the
+   * primary gatekeeper — this endpoint exists so a tampered or stale
+   * localStorage can't push the UI into a state that the rules would
+   * normally forbid.
+   */
+  validateRosterAddition(
+    roster: { id: string; position?: string; sport?: string }[],
+    player: { id: string; position?: string; sport?: string },
+    sport: string,
+  ): RosterValidationResult {
+    return validateRosterAddition(roster, player, sport);
+  }
+
+  /**
+   * Check that an entire roster fits the sport's lineup. Returns `false` if
+   * the roster would leave a player unplaceable (e.g. two goalies in a
+   * single-G hockey lineup).
+   */
+  isRosterValid(
+    roster: { id: string; position?: string; sport?: string }[],
+    sport: string,
+  ): boolean {
+    return canFitFantasyRoster(roster, sport);
   }
 }
 
