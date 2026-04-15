@@ -59,9 +59,17 @@ export class NewsService {
   constructor() {
     // @ts-ignore - process.env is available in Node.js runtime
     const env = process.env || {};
-    this.newsApiKey = env.NEWS_API_KEY || "4cf6b8fb6349484382058ee647f31586";
-    this.gnewsApiKey = env.GNEWS_API_KEY || "057a499ec2f0d1981d4f2e2d6118a17a";
-    this.apiFootballKey = env.API_FOOTBALL_KEY || "e5680ca1abecaba3f812e224c23151d3";
+    // API keys are loaded from env vars. If absent, the service falls back to
+    // the mock news feed — DO NOT ship real keys in source. Previous values
+    // were leaked in git history; rotate them in each provider's dashboard.
+    this.newsApiKey = env.NEWS_API_KEY || "";
+    this.gnewsApiKey = env.GNEWS_API_KEY || "";
+    this.apiFootballKey = env.API_FOOTBALL_KEY || "";
+    if (!this.newsApiKey && !this.gnewsApiKey && !this.apiFootballKey) {
+      console.warn(
+        "[newsService] No news API keys configured (NEWS_API_KEY, GNEWS_API_KEY, API_FOOTBALL_KEY). Falling back to mock data only."
+      );
+    }
     
     this.cache = new Map();
     
