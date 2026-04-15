@@ -9,7 +9,7 @@ import { fantasyService } from "./fantasyService";
 import { analystService } from "./analystService";
 import { userPreferencesService } from "./userPreferencesService";
 import { espnSportsData } from "./espnSportsData";
-import type { SportId } from "@shared/schema";
+import { sportIdSchema, type SportId } from "@shared/schema";
 
 /** Parse and clamp a query-string integer to [min, max]; returns fallback for NaN. */
 function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
@@ -21,6 +21,38 @@ function clampInt(raw: unknown, fallback: number, min: number, max: number): num
 /** Reject obviously bad userId values (empty / whitespace / overlong). */
 function isValidUserId(id: unknown): id is string {
   return typeof id === "string" && id.trim().length > 0 && id.length <= 128;
+}
+
+/**
+ * Parse `?sport=...` into a known SportId, or return undefined if it's
+ * missing. Returns { error } if a non-empty but invalid value was supplied —
+ * callers should 400 in that case so we don't silently fall through to a
+ * default sport.
+ */
+function parseSportQuery(raw: unknown): { sport?: SportId; error?: string } {
+  if (raw === undefined || raw === null || raw === "") return { sport: undefined };
+  const parsed = sportIdSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { error: `Unknown sport: ${String(raw).slice(0, 32)}` };
+  }
+  return { sport: parsed.data };
+}
+
+/** Same as parseSportQuery but requires a value. */
+function requireSport(raw: unknown): { sport?: SportId; error?: string } {
+  const parsed = sportIdSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { error: `sport is required and must be one of basketball|football|soccer|baseball|hockey` };
+  }
+  return { sport: parsed.data };
+}
+
+/** Clamp a free-text value and reject obvious garbage. */
+function cleanText(raw: unknown, maxLen = 128): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  return trimmed.slice(0, maxLen);
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -49,7 +81,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/scores", async (req, res) => {
     try {
-      const sportId = req.query.sport as SportId | undefined;
+      const { sport: sportId, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
       const refresh = req.query.refresh === "true";
       const scores = await scoresService.getLiveScores(sportId, !refresh);
       res.json({ scores, totalResults: scores.length, sport: sportId || "all", lastUpdated: new Date().toISOString() });
@@ -61,8 +94,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/scores/scoreboard", async (req, res) => {
     try {
-      const sportId = req.query.sport as SportId | undefined;
-      const date = req.query.date as string | undefined;
+      const { sport: sportId, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const date = cleanText(req.query.date, 32);
       const scoreboard = await scoresService.getScoreboard(sportId, date);
       res.json(scoreboard);
     } catch (error) {
@@ -84,7 +118,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/news", async (req, res) => {
     try {
-      const sportId = req.query.sport as SportId | undefined;
+      const { sport: sportId, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
       const limit = clampInt(req.query.limit, 50, 1, 100);
       const refresh = req.query.refresh === "true";
       const articles = await newsService.getLatestNews(sportId, limit, !refresh);
@@ -97,13 +132,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/news/category/:category", async (req, res) => {
     try {
-      const category = req.params.category;
-      const sportId = req.query.sport as SportId | undefined;
+      const category = cleanText(req.params.category, 64);
+      if (!category) return res.status(400).json({ error: "category is required" });
+      const { sport: sportId, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
       const limit = clampInt(req.query.limit, 50, 1, 100);
       const allArticles = await newsService.getLatestNews(sportId, 200);
+      const catLower = category.toLowerCase();
       const filtered = allArticles.filter(
-        (article) => article.category?.toLowerCase() === category.toLowerCase() ||
-          article.tags?.some((tag) => tag.toLowerCase() === category.toLowerCase())
+        (article) => article.category?.toLowerCase() === catLower ||
+          article.tags?.some((tag) => tag.toLowerCase() === catLower)
       );
       res.json({ articles: filtered.slice(0, limit), totalResults: filtered.length, category, sport: sportId || "all", lastUpdated: new Date().toISOString() });
     } catch (error) {
@@ -113,8 +151,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/news/source/:source", async (req, res) => {
     try {
-      const source = req.params.source.toLowerCase();
-      const sportId = req.query.sport as SportId | undefined;
+      const source = cleanText(req.params.source, 64)?.toLowerCase();
+      if (!source) return res.status(400).json({ error: "source is required" });
+      const { sport: sportId, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
       const limit = clampInt(req.query.limit, 50, 1, 100);
       const allArticles = await newsService.getLatestNews(sportId, 200, false);
       const filtered = allArticles.filter((article) => article.source.toLowerCase().includes(source));
@@ -145,7 +185,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/betting/schedule", async (req, res) => {
     try {
-      const sportId = req.query.sport as SportId | undefined;
+      const { sport: sportId, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
       const refresh = req.query.refresh === "true";
       const scores = await scoresService.getLiveScores(sportId, !refresh);
       res.json({
@@ -162,12 +203,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/betting/analyze", async (req, res) => {
     try {
-      const { homeTeam, awayTeam, sport, eventId } = req.body;
-      if (!homeTeam || !awayTeam || !sport) {
-        return res.status(400).json({ error: "homeTeam, awayTeam, and sport are required" });
+      const body = req.body ?? {};
+      const homeTeam = cleanText(body.homeTeam, 64);
+      const awayTeam = cleanText(body.awayTeam, 64);
+      const eventId = cleanText(body.eventId, 64);
+      if (!homeTeam || !awayTeam) {
+        return res.status(400).json({ error: "homeTeam and awayTeam are required" });
       }
+      const { sport, error } = requireSport(body.sport);
+      if (error || !sport) return res.status(400).json({ error });
       const analysis = await bettingService.analyzeGameWithOdds(homeTeam, awayTeam, sport, {
-        eventId: typeof eventId === "string" ? eventId : undefined,
+        eventId,
       });
       res.json(analysis);
     } catch (error) {
@@ -270,7 +316,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/fantasy/players", (req, res) => {
     try {
-      const sport = req.query.sport as string | undefined;
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
       const players = fantasyService.getAllPlayers(sport);
       res.json(players);
     } catch (error) {
@@ -280,15 +327,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/fantasy/players/search", async (req, res) => {
     try {
-      const query = (req.query.q as string) || "";
-      const sport = (req.query.sport as string) || "basketball";
-      const ql = query.trim().toLowerCase();
-      if (!ql) {
+      const query = cleanText(req.query.q, 128);
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const sportKey = sport ?? "basketball";
+      if (!query) {
         return res.json([]);
       }
-      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 60).catch(() => []);
+      const ql = query.toLowerCase();
+      const espnLeaders = await espnSportsData.getLeaderPlayers(sportKey, 60).catch(() => []);
       const fromEspn = espnLeaders.map((p) => fantasyService.playerStatsToFantasy(p));
-      const merged = fantasyService.mergeFantasyWithEspn(sport, fromEspn);
+      const merged = fantasyService.mergeFantasyWithEspn(sportKey, fromEspn);
       const filtered = merged.filter(
         (p) =>
           p.name.toLowerCase().includes(ql) ||
@@ -303,15 +352,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/fantasy/players/top", async (req, res) => {
     try {
-      const sport = req.query.sport as string || "basketball";
-      const position = req.query.position as string | undefined;
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const sportKey = sport ?? "basketball";
+      const position = cleanText(req.query.position, 16);
       const limit = clampInt(req.query.limit, 20, 1, 100);
-      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 40).catch(() => []);
+      const espnLeaders = await espnSportsData.getLeaderPlayers(sportKey, 40).catch(() => []);
       const fromEspn = espnLeaders.map((p) => fantasyService.playerStatsToFantasy(p));
-      const merged = fantasyService.mergeFantasyWithEspn(sport, fromEspn);
+      const merged = fantasyService.mergeFantasyWithEspn(sportKey, fromEspn);
       let list = merged;
       if (position) {
-        list = merged.filter((p) => p.position.toLowerCase().includes(position.toLowerCase()));
+        const needle = position.toLowerCase();
+        list = merged.filter((p) => p.position.toLowerCase().includes(needle));
       }
       list = [...list].sort((a, b) => b.averagePoints - a.averagePoints).slice(0, limit);
       res.json(list);
@@ -333,7 +385,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/fantasy/injured", (req, res) => {
     try {
-      const sport = req.query.sport as string | undefined;
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
       const players = fantasyService.getInjuredPlayers(sport);
       res.json(players);
     } catch (error) {
@@ -343,8 +396,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/fantasy/waiver", (req, res) => {
     try {
-      const sport = req.query.sport as string || "basketball";
-      const targets = fantasyService.getWaiverTargets(sport);
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const targets = fantasyService.getWaiverTargets(sport ?? "basketball");
       res.json(targets);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch waiver targets" });
@@ -396,11 +450,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/fantasy/trade/analyze", (req, res) => {
     try {
-      const { giving, receiving } = req.body;
-      if (!giving || !receiving) {
-        return res.status(400).json({ error: "giving and receiving player arrays required" });
+      const { giving, receiving } = req.body ?? {};
+      if (!Array.isArray(giving) || !Array.isArray(receiving)) {
+        return res.status(400).json({ error: "giving and receiving must be arrays of player IDs" });
       }
-      const analysis = fantasyService.analyzeTrade(giving, receiving);
+      if (giving.length === 0 || receiving.length === 0) {
+        return res.status(400).json({ error: "giving and receiving cannot be empty" });
+      }
+      if (giving.length > 20 || receiving.length > 20) {
+        return res.status(400).json({ error: "trade too large (max 20 per side)" });
+      }
+      const cleanGiving = giving.filter((g) => typeof g === "string" && g.length > 0 && g.length <= 64);
+      const cleanReceiving = receiving.filter((g) => typeof g === "string" && g.length > 0 && g.length <= 64);
+      if (cleanGiving.length !== giving.length || cleanReceiving.length !== receiving.length) {
+        return res.status(400).json({ error: "player IDs must be non-empty strings (<= 64 chars)" });
+      }
+      const analysis = fantasyService.analyzeTrade(cleanGiving, cleanReceiving);
       res.json(analysis);
     } catch (error) {
       res.status(500).json({ error: "Failed to analyze trade" });
@@ -409,9 +474,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/fantasy/projections", (req, res) => {
     try {
-      const sport = req.query.sport as string || "basketball";
-      const playerIds = req.query.players ? (req.query.players as string).split(",") : undefined;
-      const projections = fantasyService.getWeeklyProjections(sport, playerIds);
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const sportKey = sport ?? "basketball";
+      let playerIds: string[] | undefined;
+      if (typeof req.query.players === "string" && req.query.players.length > 0) {
+        const raw = req.query.players.split(",").map((s) => s.trim()).filter(Boolean);
+        if (raw.length > 50) {
+          return res.status(400).json({ error: "too many player IDs (max 50)" });
+        }
+        playerIds = raw.filter((id) => id.length <= 64);
+      }
+      const projections = fantasyService.getWeeklyProjections(sportKey, playerIds);
       res.json(projections);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch projections" });
@@ -420,8 +494,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/fantasy/team/sample", (req, res) => {
     try {
-      const sport = req.query.sport as string || "basketball";
-      const team = fantasyService.getSampleTeam(sport);
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const team = fantasyService.getSampleTeam(sport ?? "basketball");
       res.json(team);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch sample team" });
@@ -432,9 +507,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/analyst/teams", async (req, res) => {
     try {
-      const sport = req.query.sport as string || "basketball";
-      const espn = await espnSportsData.getTeamsForSport(sport as SportId);
-      const merged = analystService.mergeWithEspnTeams(espn, sport);
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const sportKey = sport ?? "basketball";
+      const espn = await espnSportsData.getTeamsForSport(sportKey);
+      const merged = analystService.mergeWithEspnTeams(espn, sportKey);
       res.json(merged);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch teams" });
@@ -443,14 +520,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/analyst/teams/search", async (req, res) => {
     try {
-      const query = (req.query.q as string) || "";
-      const sport = req.query.sport as string || "basketball";
-      const espn = await espnSportsData.getTeamsForSport(sport as SportId);
-      const merged = analystService.mergeWithEspnTeams(espn, sport);
-      const q = query.trim().toLowerCase();
-      if (!q) {
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const sportKey = sport ?? "basketball";
+      const query = cleanText(req.query.q, 128);
+      const espn = await espnSportsData.getTeamsForSport(sportKey);
+      const merged = analystService.mergeWithEspnTeams(espn, sportKey);
+      if (!query) {
         return res.json(merged.slice(0, 40));
       }
+      const q = query.toLowerCase();
       const filtered = merged.filter(
         (t) =>
           t.name.toLowerCase().includes(q) ||
@@ -465,11 +544,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/analyst/teams/trending", async (req, res) => {
     try {
-      const sport = req.query.sport as string || "basketball";
-      const espn = await espnSportsData.getTeamsForSport(sport as SportId);
-      const merged = analystService.mergeWithEspnTeams(espn, sport);
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const sportKey = sport ?? "basketball";
+      const espn = await espnSportsData.getTeamsForSport(sportKey);
+      const merged = analystService.mergeWithEspnTeams(espn, sportKey);
       const hot = analystService.rankHotTeams(merged, 10);
-      res.json(hot.length > 0 ? hot : analystService.getTrendingTeams(sport));
+      res.json(hot.length > 0 ? hot : analystService.getTrendingTeams(sportKey));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch trending teams" });
     }
@@ -477,13 +558,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/analyst/teams/:id", async (req, res) => {
     try {
-      const sport = (req.query.sport as string) || "basketball";
-      const espn = await espnSportsData.getTeamsForSport(sport as SportId);
-      const merged = analystService.mergeWithEspnTeams(espn, sport);
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const sportKey = sport ?? "basketball";
+      const id = cleanText(req.params.id, 128);
+      if (!id) return res.status(400).json({ error: "team id is required" });
+      const espn = await espnSportsData.getTeamsForSport(sportKey);
+      const merged = analystService.mergeWithEspnTeams(espn, sportKey);
       const team =
-        merged.find((t) => t.id === req.params.id) ||
-        merged.find((t) => t.name.toLowerCase() === req.params.id.toLowerCase()) ||
-        analystService.getTeam(req.params.id);
+        merged.find((t) => t.id === id) ||
+        merged.find((t) => t.name.toLowerCase() === id.toLowerCase()) ||
+        analystService.getTeam(id);
       if (!team) return res.status(404).json({ error: "Team not found" });
       res.json(team);
     } catch (error) {
@@ -493,12 +578,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/analyst/teams/compare", async (req, res) => {
     try {
-      const { team1, team2, sport = "basketball" } = req.body;
+      const body = req.body ?? {};
+      const team1 = cleanText(body.team1, 128);
+      const team2 = cleanText(body.team2, 128);
       if (!team1 || !team2) {
         return res.status(400).json({ error: "team1 and team2 are required" });
       }
-      const espn = await espnSportsData.getTeamsForSport(sport as SportId);
-      const merged = analystService.mergeWithEspnTeams(espn, sport);
+      const { sport, error } = parseSportQuery(body.sport);
+      if (error) return res.status(400).json({ error });
+      const sportKey = sport ?? "basketball";
+      const espn = await espnSportsData.getTeamsForSport(sportKey);
+      const merged = analystService.mergeWithEspnTeams(espn, sportKey);
       const t1 =
         merged.find((t) => t.name === team1) ||
         merged.find((t) => t.name.toLowerCase().includes(team1.toLowerCase())) ||
@@ -522,15 +612,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/analyst/players/search", async (req, res) => {
     try {
-      const query = (req.query.q as string) || "";
-      const sport = (req.query.sport as string) || "basketball";
-      const ql = query.trim().toLowerCase();
-      if (!ql) {
-        const merged = analystService.mergePlayerSources([], sport);
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const sportKey = sport ?? "basketball";
+      const query = cleanText(req.query.q, 128);
+      if (!query) {
+        const merged = analystService.mergePlayerSources([], sportKey);
         return res.json(merged.slice(0, 30));
       }
-      const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 80).catch(() => []);
-      const merged = analystService.mergePlayerSources(espnLeaders, sport);
+      const ql = query.toLowerCase();
+      const espnLeaders = await espnSportsData.getLeaderPlayers(sportKey, 80).catch(() => []);
+      const merged = analystService.mergePlayerSources(espnLeaders, sportKey);
       const filtered = merged.filter(
         (p) =>
           p.name.toLowerCase().includes(ql) ||
@@ -555,7 +647,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/analyst/players/compare", (req, res) => {
     try {
-      const { player1, player2 } = req.body;
+      const body = req.body ?? {};
+      const player1 = cleanText(body.player1, 128);
+      const player2 = cleanText(body.player2, 128);
       if (!player1 || !player2) {
         return res.status(400).json({ error: "player1 and player2 are required" });
       }
@@ -568,8 +662,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/analyst/h2h", (req, res) => {
     try {
-      const team1 = req.query.team1 as string;
-      const team2 = req.query.team2 as string;
+      const team1 = cleanText(req.query.team1, 128);
+      const team2 = cleanText(req.query.team2, 128);
       if (!team1 || !team2) {
         return res.status(400).json({ error: "team1 and team2 are required" });
       }
@@ -582,8 +676,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/analyst/leaders", async (req, res) => {
     try {
-      const sport = req.query.sport as string || "basketball";
-      const fromEspn = await espnSportsData.getLeaderPlayers(sport as SportId, 30).catch(() => []);
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const sportKey = sport ?? "basketball";
+      const fromEspn = await espnSportsData.getLeaderPlayers(sportKey, 30).catch(() => []);
       if (fromEspn.length > 0) {
         const rows = fromEspn.slice(0, 12).map((p) => {
           const entries = Object.entries(p.stats);
@@ -597,7 +693,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         return res.json(rows);
       }
-      const leaders = analystService.getLeagueLeaders(sport);
+      const leaders = analystService.getLeagueLeaders(sportKey);
       res.json(leaders);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch league leaders" });
@@ -608,6 +704,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/preferences/:userId", (req, res) => {
     try {
+      if (!isValidUserId(req.params.userId)) {
+        return res.status(400).json({ error: "Invalid userId" });
+      }
       const prefs = userPreferencesService.getPreferences(req.params.userId);
       res.json(prefs);
     } catch (error) {
@@ -617,6 +716,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/preferences/:userId", (req, res) => {
     try {
+      if (!isValidUserId(req.params.userId)) {
+        return res.status(400).json({ error: "Invalid userId" });
+      }
       const updated = userPreferencesService.updatePreferences(req.params.userId, req.body);
       res.json(updated);
     } catch (error) {
@@ -626,6 +728,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/preferences/:userId/reset", (req, res) => {
     try {
+      if (!isValidUserId(req.params.userId)) {
+        return res.status(400).json({ error: "Invalid userId" });
+      }
       const prefs = userPreferencesService.resetPreferences(req.params.userId);
       res.json(prefs);
     } catch (error) {
@@ -646,8 +751,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/status/reset/:apiName", async (req, res) => {
     try {
-      apiManager.resetApi(req.params.apiName);
-      res.json({ message: `API ${req.params.apiName} reset successfully`, status: apiManager.getApiStatus(req.params.apiName) });
+      const apiName = cleanText(req.params.apiName, 64);
+      if (!apiName) return res.status(400).json({ error: "apiName is required" });
+      apiManager.resetApi(apiName);
+      res.json({ message: `API ${apiName} reset successfully`, status: apiManager.getApiStatus(apiName) });
     } catch (error) {
       res.status(500).json({ error: "Failed to reset API" });
     }
