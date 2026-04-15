@@ -117,8 +117,10 @@ export class ScoresService {
 
       for (const endpoint of endpoints) {
         if (!endpoint) continue;
-        const response = await fetch(endpoint);
-        if (!response.ok) continue;
+        const response = await fetch(endpoint, {
+          signal: AbortSignal.timeout(10000),
+        }).catch(() => null);
+        if (!response || !response.ok) continue;
 
         const data = await response.json();
         
@@ -141,8 +143,8 @@ export class ScoresService {
               league: event.leagues?.[0]?.name || "",
               homeTeam: homeTeam.team?.displayName || "",
               awayTeam: awayTeam.team?.displayName || "",
-              homeScore: homeTeam.score ? parseInt(homeTeam.score) : null,
-              awayScore: awayTeam.score ? parseInt(awayTeam.score) : null,
+              homeScore: this.safeParseInt(homeTeam.score),
+              awayScore: this.safeParseInt(awayTeam.score),
               status: status,
               startTime: event.date || new Date().toISOString(),
               period: event.status?.type?.shortDetail,
@@ -179,8 +181,10 @@ export class ScoresService {
       // Get live events
       const url = `https://www.thesportsdb.com/api/v1/json/${this.theSportsDbKey}/eventspastleague.php?id=${leagueId}`;
 
-      const response = await fetch(url);
-      if (!response.ok) return [];
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(10000),
+      }).catch(() => null);
+      if (!response || !response.ok) return [];
 
       const data = await response.json();
 
@@ -191,8 +195,8 @@ export class ScoresService {
           league: event.strLeague || "",
           homeTeam: event.strHomeTeam || "",
           awayTeam: event.strAwayTeam || "",
-          homeScore: event.intHomeScore ? parseInt(event.intHomeScore) : null,
-          awayScore: event.intAwayScore ? parseInt(event.intAwayScore) : null,
+          homeScore: this.safeParseInt(event.intHomeScore),
+          awayScore: this.safeParseInt(event.intAwayScore),
           status: event.strStatus === "Match Finished" ? "finished" : 
                   event.strStatus === "Live" ? "live" : "scheduled",
           startTime: event.dateEvent ? `${event.dateEvent}T${event.strTime || "00:00:00"}` : new Date().toISOString(),
@@ -208,12 +212,18 @@ export class ScoresService {
   }
 
   /**
-   * Parse ESPN status to our status format
+   * Parse ESPN status to our status format.
+   * ESPN state values: "pre" (scheduled), "in" (live/in progress),
+   * "post" (game over / final). The previous version mistakenly treated
+   * "post" as live, which made finished games appear to still be playing.
    */
   private parseESPNStatus(state?: string): "scheduled" | "live" | "finished" {
     if (!state) return "scheduled";
-    if (state === "in" || state === "post") return "live";
-    if (state === "final" || state === "stat_final") return "finished";
+    const s = state.toLowerCase();
+    if (s === "in") return "live";
+    if (s === "post" || s === "final" || s === "stat_final" || s.includes("final")) {
+      return "finished";
+    }
     return "scheduled";
   }
 
@@ -225,6 +235,16 @@ export class ScoresService {
     if (slug.includes("football") || slug.includes("nfl")) return "football";
     if (slug.includes("soccer")) return "soccer";
     return "basketball"; // Default
+  }
+
+  /**
+   * Parse a value that may be string|number|undefined into a finite int,
+   * or null. Avoids returning NaN, which crashes downstream comparisons.
+   */
+  private safeParseInt(value: unknown): number | null {
+    if (value === null || value === undefined || value === "") return null;
+    const n = typeof value === "number" ? value : parseInt(String(value), 10);
+    return Number.isFinite(n) ? n : null;
   }
 
   /**

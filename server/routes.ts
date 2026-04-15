@@ -11,6 +11,18 @@ import { userPreferencesService } from "./userPreferencesService";
 import { espnSportsData } from "./espnSportsData";
 import type { SportId } from "@shared/schema";
 
+/** Parse and clamp a query-string integer to [min, max]; returns fallback for NaN. */
+function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
+  const n = parseInt(String(raw ?? ""), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+/** Reject obviously bad userId values (empty / whitespace / overlong). */
+function isValidUserId(id: unknown): id is string {
+  return typeof id === "string" && id.trim().length > 0 && id.length <= 128;
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
 
   // ==================== GAMES / SCORES ====================
@@ -73,9 +85,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/news", async (req, res) => {
     try {
       const sportId = req.query.sport as SportId | undefined;
-      const limit = parseInt(req.query.limit as string) || 50;
+      const limit = clampInt(req.query.limit, 50, 1, 100);
       const refresh = req.query.refresh === "true";
-      const articles = await newsService.getLatestNews(sportId, Math.min(limit, 100), !refresh);
+      const articles = await newsService.getLatestNews(sportId, limit, !refresh);
       res.json({ articles, totalResults: articles.length, sport: sportId || "all", lastUpdated: new Date().toISOString() });
     } catch (error) {
       console.error("Error fetching news:", error);
@@ -87,7 +99,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const category = req.params.category;
       const sportId = req.query.sport as SportId | undefined;
-      const limit = parseInt(req.query.limit as string) || 50;
+      const limit = clampInt(req.query.limit, 50, 1, 100);
       const allArticles = await newsService.getLatestNews(sportId, 200);
       const filtered = allArticles.filter(
         (article) => article.category?.toLowerCase() === category.toLowerCase() ||
@@ -103,7 +115,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const source = req.params.source.toLowerCase();
       const sportId = req.query.sport as SportId | undefined;
-      const limit = parseInt(req.query.limit as string) || 50;
+      const limit = clampInt(req.query.limit, 50, 1, 100);
       const allArticles = await newsService.getLatestNews(sportId, 200, false);
       const filtered = allArticles.filter((article) => article.source.toLowerCase().includes(source));
       res.json({ articles: filtered.slice(0, limit), totalResults: filtered.length, source, sport: sportId || "all", lastUpdated: new Date().toISOString() });
@@ -175,6 +187,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/betting/account/:userId", (req, res) => {
     try {
+      if (!isValidUserId(req.params.userId)) {
+        return res.status(400).json({ error: "Invalid userId" });
+      }
       const account = bettingService.getAccount(req.params.userId);
       res.json(account);
     } catch (error) {
@@ -184,6 +199,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/betting/bets/:userId", (req, res) => {
     try {
+      if (!isValidUserId(req.params.userId)) {
+        return res.status(400).json({ error: "Invalid userId" });
+      }
       const bets = bettingService.getBets(req.params.userId);
       res.json(bets);
     } catch (error) {
@@ -193,7 +211,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/betting/bets/:userId", (req, res) => {
     try {
-      const result = bettingService.placeBet(req.params.userId, req.body);
+      if (!isValidUserId(req.params.userId)) {
+        return res.status(400).json({ error: "Invalid userId" });
+      }
+      // Defensive payload validation — bettingService also validates, but
+      // we want to fail fast and return 400 (not 500) for client mistakes.
+      const body = req.body ?? {};
+      const amount = Number(body.amount);
+      const odds = Number(body.odds);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ error: "amount must be a positive number" });
+      }
+      if (!Number.isFinite(odds) || odds === 0) {
+        return res.status(400).json({ error: "odds must be a non-zero number" });
+      }
+      if (typeof body.betType !== "string" || !body.betType) {
+        return res.status(400).json({ error: "betType is required" });
+      }
+      const result = bettingService.placeBet(req.params.userId, { ...body, amount, odds });
       if ("error" in result) {
         return res.status(400).json(result);
       }
@@ -206,6 +241,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/betting/bets/:userId/:betId", (req, res) => {
     try {
+      if (!isValidUserId(req.params.userId)) {
+        return res.status(400).json({ error: "Invalid userId" });
+      }
       const result = bettingService.cancelBet(req.params.userId, req.params.betId);
       if ("error" in result) {
         return res.status(400).json(result);
@@ -218,6 +256,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/betting/account/:userId/reset", (req, res) => {
     try {
+      if (!isValidUserId(req.params.userId)) {
+        return res.status(400).json({ error: "Invalid userId" });
+      }
       const account = bettingService.resetAccount(req.params.userId);
       res.json(account);
     } catch (error) {
@@ -264,7 +305,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const sport = req.query.sport as string || "basketball";
       const position = req.query.position as string | undefined;
-      const limit = parseInt(req.query.limit as string) || 20;
+      const limit = clampInt(req.query.limit, 20, 1, 100);
       const espnLeaders = await espnSportsData.getLeaderPlayers(sport as SportId, 40).catch(() => []);
       const fromEspn = espnLeaders.map((p) => fantasyService.playerStatsToFantasy(p));
       const merged = fantasyService.mergeFantasyWithEspn(sport, fromEspn);

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { TrendingUp, Users, BarChart3, ArrowRight, DollarSign, Trophy, Target, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fetchJson } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 
@@ -11,23 +12,17 @@ function BettingSummary() {
   const userId = user?.id || "default";
   const { data: account } = useQuery({
     queryKey: ["betting-account", userId],
-    queryFn: async () => {
-      const res = await fetch(`/api/betting/account/${userId}`);
-      return res.json();
-    },
+    queryFn: () => fetchJson<any>(`/api/betting/account/${userId}`),
     staleTime: 30000,
   });
   const { data: bets } = useQuery({
     queryKey: ["betting-bets", userId],
-    queryFn: async () => {
-      const res = await fetch(`/api/betting/bets/${userId}`);
-      return res.json();
-    },
+    queryFn: () => fetchJson<any[]>(`/api/betting/bets/${userId}`),
     staleTime: 30000,
   });
 
-  const pendingBets = (bets || []).filter((b: any) => b.status === "pending");
-  const profit = account?.totalProfit || 0;
+  const pendingBets = Array.isArray(bets) ? bets.filter((b: any) => b?.status === "pending") : [];
+  const profit = Number(account?.totalProfit) || 0;
 
   return (
     <Link href="/apps/betting">
@@ -91,14 +86,11 @@ function FantasySummary() {
 
   const { data: injured } = useQuery({
     queryKey: ["/api/fantasy/injured", primarySport],
-    queryFn: async () => {
-      const res = await fetch(`/api/fantasy/injured?sport=${primarySport}`);
-      return res.json();
-    },
+    queryFn: () => fetchJson<any[]>(`/api/fantasy/injured?sport=${primarySport}`),
     staleTime: 300000,
   });
 
-  const injuryAlerts = (injured || []).slice(0, 2);
+  const injuryAlerts = Array.isArray(injured) ? injured.slice(0, 2) : [];
 
   return (
     <Link href="/apps/fantasy">
@@ -142,14 +134,11 @@ function AnalystSummary() {
 
   const { data: teams } = useQuery({
     queryKey: ["/api/analyst/teams", primarySport],
-    queryFn: async () => {
-      const res = await fetch(`/api/analyst/teams?sport=${primarySport}`);
-      return res.json();
-    },
+    queryFn: () => fetchJson<any[]>(`/api/analyst/teams?sport=${primarySport}`),
     staleTime: 300000,
   });
 
-  const teamCount = teams?.length || 0;
+  const teamCount = Array.isArray(teams) ? teams.length : 0;
   const sportLabel = primarySport === "basketball" ? "NBA" :
                      primarySport === "football" ? "NFL" :
                      primarySport === "soccer" ? "EPL" :

@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Clock, ChevronRight, Wifi } from "lucide-react";
+import { RefreshCw, Clock, ChevronRight, Wifi, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fetchJson } from "@/lib/queryClient";
 import type { SportId } from "@shared/schema";
 
 const SPORT_LABELS: Record<string, string> = {
@@ -101,15 +102,15 @@ interface LiveScoresWidgetProps {
 export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
   const [selectedSport, setSelectedSport] = useState<string>("all");
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["/api/scores", selectedSport],
     queryFn: async () => {
       const url = selectedSport === "all" ? "/api/scores" : `/api/scores?sport=${selectedSport}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("Failed to fetch scores");
-      return res.json();
+      return fetchJson<{ scores: Score[] }>(url);
     },
     refetchInterval: 60000, // Auto-refresh every minute
+    // Keep prior scores visible while we re-fetch instead of flashing the empty state.
+    placeholderData: (prev) => prev,
   });
 
   const scores: Score[] = data?.scores || [];
@@ -176,6 +177,19 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
               </div>
             </div>
           ))}
+        </div>
+      ) : isError && scores.length === 0 ? (
+        <div className="glass-card p-8 text-center border-destructive/30">
+          <AlertCircle className="w-8 h-8 text-destructive mx-auto mb-2" />
+          <p className="text-sm text-foreground font-medium">Couldn&apos;t load scores</p>
+          <p className="text-xs text-muted-foreground mt-1">Check your connection or try again.</p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition"
+          >
+            Retry
+          </button>
         </div>
       ) : scores.length === 0 ? (
         <div className="glass-card p-8 text-center">

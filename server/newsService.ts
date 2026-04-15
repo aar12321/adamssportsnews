@@ -47,6 +47,14 @@ export class NewsService {
   
   private cache: Map<string, { data: NewsArticle[]; timestamp: number }>;
   private cacheTTL: number = 5 * 60 * 1000; // 5 minutes
+  private idCounter: number = 0;
+
+  /** Stable, collision-free article ID. Date.now()+index collides under
+   *  parallel fetches; this monotonic counter never does. */
+  private nextId(prefix: string): string {
+    this.idCounter = (this.idCounter + 1) >>> 0;
+    return `${prefix}_${Date.now().toString(36)}_${this.idCounter.toString(36)}`;
+  }
 
   constructor() {
     // @ts-ignore - process.env is available in Node.js runtime
@@ -196,8 +204,8 @@ export class NewsService {
 
         const data = await response.json();
         if (data.articles && Array.isArray(data.articles)) {
-          const articles = data.articles.slice(0, limit).map((article: any, index: number) => ({
-            id: `espn_${Date.now()}_${index}`,
+          const articles = data.articles.slice(0, limit).map((article: any) => ({
+            id: this.nextId("espn"),
             title: article.headline || article.title || "",
             description: article.description || "",
             content: article.content,
@@ -265,8 +273,8 @@ export class NewsService {
       if (data.status === "ok" && data.articles) {
         const articles = data.articles
           .filter((article: any) => article.title && article.url)
-          .map((article: any, index: number) => ({
-            id: `newsapi_${Date.now()}_${index}`,
+          .map((article: any) => ({
+            id: this.nextId("newsapi"),
             title: article.title || "",
             description: article.description || "",
             content: article.content,
@@ -334,8 +342,8 @@ export class NewsService {
       const data = await response.json();
 
       if (data.articles && Array.isArray(data.articles)) {
-        return data.articles.map((article: any, index: number) => ({
-          id: `gnews_${Date.now()}_${index}`,
+        return data.articles.map((article: any) => ({
+          id: this.nextId("gnews"),
           title: article.title || "",
           description: article.description || "",
           content: article.content,
@@ -457,8 +465,8 @@ export class NewsService {
       const data = await response.json();
 
       if (data.response && Array.isArray(data.response)) {
-        return data.response.slice(0, limit).map((fixture: any, index: number) => ({
-          id: `apifootball_${fixture.fixture?.id || Date.now()}_${index}`,
+        return data.response.slice(0, limit).map((fixture: any) => ({
+          id: fixture.fixture?.id ? `apifootball_${fixture.fixture.id}` : this.nextId("apifootball"),
           title: `${fixture.teams?.home?.name} vs ${fixture.teams?.away?.name}`,
           description: `Live match: ${fixture.league?.name} - ${fixture.fixture?.status?.long || "Scheduled"}`,
           url: `https://www.api-football.com/fixtures/${fixture.fixture?.id}`,
@@ -512,8 +520,8 @@ export class NewsService {
       const data = await response.json();
 
       if (data.events && Array.isArray(data.events)) {
-        return data.events.slice(0, limit).map((event: any, index: number) => ({
-          id: `sportsdb_${event.idEvent || Date.now()}_${index}`,
+        return data.events.slice(0, limit).map((event: any) => ({
+          id: event.idEvent ? `sportsdb_${event.idEvent}` : this.nextId("sportsdb"),
           title: `${event.strHomeTeam} vs ${event.strAwayTeam} - ${event.strEvent || ""}`,
           description: event.strDescriptionEN || event.strEvent || "",
           url: event.strVideo || "",
@@ -533,13 +541,18 @@ export class NewsService {
   }
 
   /**
-   * Remove duplicate articles by URL
+   * Remove duplicate articles. Dedup primarily by URL, but if a feed
+   * supplies empty URLs (TheSportsDB sometimes does), fall back to a
+   * normalized title so we don't collapse every empty-URL article into one.
    */
   private deduplicateArticles(articles: NewsArticle[]): NewsArticle[] {
     const seen = new Set<string>();
     return articles.filter((article) => {
-      if (seen.has(article.url)) return false;
-      seen.add(article.url);
+      const key = article.url && article.url.trim().length > 0
+        ? `u:${article.url}`
+        : `t:${(article.title || "").trim().toLowerCase().slice(0, 80)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
   }

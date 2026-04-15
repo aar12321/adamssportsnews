@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Search, Filter, Zap, AlertTriangle, ArrowLeftRight, MessageCircle, Newspaper } from "lucide-react";
+import { RefreshCw, Search, Filter, Zap, AlertTriangle, ArrowLeftRight, MessageCircle, Newspaper, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fetchJson } from "@/lib/queryClient";
 import NewsCard, { type NewsCategory } from "./NewsCard";
 
 const CATEGORIES: { key: NewsCategory; label: string; Icon: any }[] = [
@@ -44,14 +45,11 @@ export default function NewsFeed({ categories, count }: NewsFeedProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["/api/news"],
-    queryFn: async () => {
-      const res = await fetch("/api/news?limit=80");
-      if (!res.ok) throw new Error("Failed to fetch news");
-      return res.json();
-    },
+    queryFn: async () => fetchJson<{ articles: any[] }>("/api/news?limit=80"),
     refetchInterval: 5 * 60 * 1000, // 5 min
+    placeholderData: (prev) => prev,
   });
 
   const processedArticles = useMemo(() => {
@@ -188,6 +186,19 @@ export default function NewsFeed({ categories, count }: NewsFeedProps) {
               <div className="h-3 bg-muted rounded w-2/3" />
             </div>
           ))}
+        </div>
+      ) : isError && filteredArticles.length === 0 ? (
+        <div className="glass-card p-8 text-center border-destructive/30">
+          <AlertCircle className="w-8 h-8 text-destructive mx-auto mb-2" />
+          <p className="text-sm text-foreground font-medium">Couldn&apos;t load news</p>
+          <p className="text-xs text-muted-foreground mt-1">All upstream sources unavailable. Try again in a moment.</p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition"
+          >
+            Retry
+          </button>
         </div>
       ) : filteredArticles.length === 0 ? (
         <div className="glass-card p-8 text-center">

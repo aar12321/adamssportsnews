@@ -8,6 +8,7 @@ export interface ApiStatus {
   isHealthy: boolean;
   lastError?: string;
   lastSuccess?: number;
+  lastFailure?: number;
   consecutiveFailures: number;
   rateLimitRemaining?: number;
   rateLimitReset?: number;
@@ -61,6 +62,7 @@ export class ApiManager {
     if (status) {
       status.consecutiveFailures += 1;
       status.lastError = error;
+      status.lastFailure = Date.now();
 
       // Mark as unhealthy if too many failures
       if (status.consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
@@ -79,8 +81,12 @@ export class ApiManager {
 
     // Check if unhealthy
     if (!status.isHealthy) {
-      // Try to recover after health check interval
-      if (status.lastSuccess && Date.now() - status.lastSuccess > this.HEALTH_CHECK_INTERVAL) {
+      // Probe again after the health-check interval. We use the most recent
+      // failure (or last success, whichever is later) as the cooldown anchor
+      // so that an API which has *never* succeeded still gets retried
+      // periodically rather than being permanently shunned.
+      const anchor = Math.max(status.lastFailure ?? 0, status.lastSuccess ?? 0);
+      if (anchor === 0 || Date.now() - anchor > this.HEALTH_CHECK_INTERVAL) {
         status.isHealthy = true;
         status.consecutiveFailures = 0;
         return true;

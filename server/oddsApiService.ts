@@ -51,7 +51,10 @@ export class OddsApiService {
     url.searchParams.set("oddsFormat", "american");
 
     try {
-      const res = await fetch(url.toString());
+      // 10s timeout — without this, a hung connection blocks every bet analysis
+      const res = await fetch(url.toString(), {
+        signal: AbortSignal.timeout(10000),
+      });
       if (!res.ok) {
         console.error("Odds API HTTP", res.status);
         return null;

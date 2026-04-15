@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { APP_SPORTS, getUserAppSports } from "@shared/appSports";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Skeleton } from "@/components/ui/skeleton";
+import { fetchJson } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 const SPORT_GAMES: Record<string, { home: string; away: string; league: string }[]> = {
@@ -92,7 +93,7 @@ type Pick =
   | { kind: "spread"; team: "home" | "away" }
   | { kind: "over_under"; side: "over" | "under" };
 
-function AnalysisPanel({ analysis, game, onPlaceBet }: { analysis: any; game: GameRow; onPlaceBet: (bet: any) => void }) {
+function AnalysisPanel({ analysis, game, onPlaceBet, isPlacing }: { analysis: any; game: GameRow; onPlaceBet: (bet: any) => void; isPlacing?: boolean }) {
   const oddsLabel =
     analysis.oddsSource === "sportsbook"
       ? "Lines from sportsbook (The Odds API)"
@@ -405,9 +406,10 @@ function AnalysisPanel({ analysis, game, onPlaceBet }: { analysis: any; game: Ga
             </div>
             <button
               onClick={handlePlaceBet}
-              className="btn-primary whitespace-nowrap"
+              disabled={isPlacing || hasStarted}
+              className="btn-primary whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Place ${stake} Bet
+              {isPlacing ? "Placing…" : `Place $${stake} Bet`}
             </button>
           </div>
         </div>
@@ -416,17 +418,30 @@ function AnalysisPanel({ analysis, game, onPlaceBet }: { analysis: any; game: Ga
   );
 }
 
-function AccountCard({ account, onReset }: { account: any; onReset: () => void }) {
-  const profit = account?.totalProfit || 0;
+function AccountCard({ account, onReset, isResetting }: { account: any; onReset: () => void; isResetting?: boolean }) {
+  const profit = Number(account?.totalProfit) || 0;
   const isUp = profit >= 0;
+
+  const handleReset = () => {
+    // Reset wipes the user's mock balance, history, and stats. Confirm
+    // before destroying state so a stray click can't lose all bet history.
+    if (typeof window !== "undefined" && !window.confirm("Reset your mock account? This clears your $10,000 balance and all bet history.")) {
+      return;
+    }
+    onReset();
+  };
 
   return (
     <div className="glass-card p-5">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-bold text-foreground">Mock Account</h3>
-        <button onClick={onReset} className="btn-ghost py-1 text-xs gap-1.5">
-          <RotateCcw className="w-3.5 h-3.5" />
-          Reset
+        <button
+          onClick={handleReset}
+          disabled={isResetting}
+          className="btn-ghost py-1 text-xs gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          <RotateCcw className={cn("w-3.5 h-3.5", isResetting && "animate-spin")} />
+          {isResetting ? "Resetting…" : "Reset"}
         </button>
       </div>
       <div className="mb-4">
@@ -453,7 +468,7 @@ function AccountCard({ account, onReset }: { account: any; onReset: () => void }
   );
 }
 
-function BetHistoryList({ bets, onCancel }: { bets: any[]; onCancel?: (betId: string) => void }) {
+function BetHistoryList({ bets, onCancel, cancellingBetId }: { bets: any[]; onCancel?: (betId: string) => void; cancellingBetId?: string | null }) {
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState<"all" | "pending" | "won" | "lost">("all");
 
@@ -614,11 +629,12 @@ function BetHistoryList({ bets, onCancel }: { bets: any[]; onCancel?: (betId: st
                 {bet.status === "pending" && onCancel && (
                   <button
                     onClick={() => onCancel(bet.id)}
-                    className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-all"
+                    disabled={cancellingBetId === bet.id}
+                    className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Cancel bet"
                   >
                     <Trash2 className="w-3 h-3" />
-                    Cancel
+                    {cancellingBetId === bet.id ? "Cancelling…" : "Cancel"}
                   </button>
                 )}
               </div>
@@ -792,43 +808,26 @@ export default function BettingApp() {
 
   const { data: account } = useQuery({
     queryKey: ["betting-account", userId],
-    queryFn: async () => {
-      const res = await fetch(`/api/betting/account/${userId}`);
-      return res.json();
-    },
+    queryFn: () => fetchJson<any>(`/api/betting/account/${userId}`),
     refetchInterval: 30000,
     staleTime: 25000,
   });
 
   const { data: bets } = useQuery({
     queryKey: ["betting-bets", userId],
-    queryFn: async () => {
-      const res = await fetch(`/api/betting/bets/${userId}`);
-      return res.json();
-    },
+    queryFn: () => fetchJson<any[]>(`/api/betting/bets/${userId}`),
     refetchInterval: 30000,
     staleTime: 25000,
   });
 
   const { data: trending } = useQuery({
     queryKey: ["/api/betting/trending"],
-    queryFn: async () => {
-      const res = await fetch("/api/betting/trending");
-      return res.json();
-    },
+    queryFn: () => fetchJson<any[]>("/api/betting/trending"),
   });
 
-  const handlePlaceBet = useCallback((bet: any) => {
-    placeBetMutation.mutate(bet);
-  }, []);
-
-  const handleReset = useCallback(() => {
-    resetMutation.mutate();
-  }, []);
-
   const pendingBetsCount = useMemo(() => {
-    if (!bets) return 0;
-    return bets.filter((b: any) => b.status === "pending").length;
+    if (!Array.isArray(bets)) return 0;
+    return bets.filter((b: any) => b?.status === "pending").length;
   }, [bets]);
 
   const placeBetMutation = useMutation({
@@ -838,8 +837,10 @@ export default function BettingApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(betData),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.error) {
+        throw new Error(data?.error || `Failed to place bet (HTTP ${res.status})`);
+      }
       return data;
     },
     onSuccess: () => {
@@ -852,8 +853,10 @@ export default function BettingApp() {
   const cancelBetMutation = useMutation({
     mutationFn: async (betId: string) => {
       const res = await fetch(`/api/betting/bets/${userId}/${betId}`, { method: "DELETE" });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.error) {
+        throw new Error(data?.error || `Failed to cancel bet (HTTP ${res.status})`);
+      }
       return data;
     },
     onSuccess: () => {
@@ -865,7 +868,9 @@ export default function BettingApp() {
   const resetMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch(`/api/betting/account/${userId}/reset`, { method: "POST" });
-      return res.json();
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) throw new Error(data?.error || `Failed to reset account (HTTP ${res.status})`);
+      return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["betting-account", userId] });
@@ -873,9 +878,27 @@ export default function BettingApp() {
     },
   });
 
+  // Track which bet ID is currently being cancelled so we can disable just
+  // that row's button (rather than every Cancel button on the page).
+  const cancellingBetId =
+    cancelBetMutation.isPending && typeof cancelBetMutation.variables === "string"
+      ? (cancelBetMutation.variables as string)
+      : null;
+
+  const handlePlaceBet = useCallback((bet: any) => {
+    if (placeBetMutation.isPending) return; // guard against double-submit
+    placeBetMutation.mutate(bet);
+  }, [placeBetMutation]);
+
+  const handleReset = useCallback(() => {
+    if (resetMutation.isPending) return;
+    resetMutation.mutate();
+  }, [resetMutation]);
+
   const handleCancelBet = useCallback((betId: string) => {
+    if (cancelBetMutation.isPending) return;
     cancelBetMutation.mutate(betId);
-  }, []);
+  }, [cancelBetMutation]);
 
   return (
     <div className="animate-fade-in max-w-4xl">
@@ -897,7 +920,7 @@ export default function BettingApp() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left: Account + controls */}
         <div className="space-y-4">
-          <MemoizedAccountCard account={account} onReset={handleReset} />
+          <MemoizedAccountCard account={account} onReset={handleReset} isResetting={resetMutation.isPending} />
 
           {/* Sport selector */}
           <div className="glass-card p-4 space-y-3">
@@ -1064,6 +1087,7 @@ export default function BettingApp() {
                   analysis={analysis}
                   game={selectedGame}
                   onPlaceBet={handlePlaceBet}
+                  isPlacing={placeBetMutation.isPending}
                 />
               ) : null}
               {placeBetMutation.isError && (
@@ -1082,7 +1106,11 @@ export default function BettingApp() {
           )}
 
           {activeTab === "mybets" && (
-            <MemoizedBetHistoryList bets={bets || []} onCancel={handleCancelBet} />
+            <MemoizedBetHistoryList
+              bets={Array.isArray(bets) ? bets : []}
+              onCancel={handleCancelBet}
+              cancellingBetId={cancellingBetId}
+            />
           )}
         </div>
       </div>
