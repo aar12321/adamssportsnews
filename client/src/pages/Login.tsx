@@ -1,10 +1,25 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Trophy, Mail, Lock, Loader2, User, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
+/**
+ * Google "G" mark — inline SVG so the button never depends on a network
+ * fetch and renders identically in dark and light themes.
+ */
+function GoogleIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z" />
+      <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z" />
+      <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z" />
+      <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303c-.792 2.237-2.231 4.166-4.094 5.571.001-.001.002-.001.003-.002l6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z" />
+    </svg>
+  );
+}
+
 export default function Login() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, signInWithGoogle } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -13,7 +28,38 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  // Surface OAuth callback errors. Supabase appends ?error=... &
+  // error_description=... to the redirect URL when OAuth fails (e.g.,
+  // user denied consent, account-linking conflict, provider not enabled).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const oauthError = params.get("error") || hashParams.get("error");
+    const desc = params.get("error_description") || hashParams.get("error_description");
+    if (oauthError) {
+      setError(decodeURIComponent(desc || oauthError).replace(/\+/g, " "));
+      // Clean the URL so a refresh doesn't re-show the error.
+      const clean = window.location.pathname;
+      window.history.replaceState({}, document.title, clean);
+    }
+  }, []);
+
+  const handleGoogle = async () => {
+    setError(null);
+    setSuccess(null);
+    setGoogleLoading(true);
+    const { error: oauthError } = await signInWithGoogle();
+    if (oauthError) {
+      setError(oauthError);
+      setGoogleLoading(false);
+    }
+    // On success the browser is redirected to Google, so we don't reset
+    // googleLoading — the page will unmount.
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,6 +159,33 @@ export default function Login() {
             </div>
           )}
 
+          {/* Google sign-in (works for both new accounts and existing
+              email/password users — Supabase auto-links by verified email). */}
+          <button
+            type="button"
+            onClick={handleGoogle}
+            disabled={googleLoading || loading}
+            aria-label={mode === "login" ? "Sign in with Google" : "Sign up with Google"}
+            className="w-full h-11 bg-white hover:bg-gray-50 text-gray-800 font-medium rounded-xl text-sm border border-gray-300 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2.5 mb-4"
+          >
+            {googleLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <GoogleIcon className="w-5 h-5" />
+            )}
+            <span>{mode === "login" ? "Continue with Google" : "Sign up with Google"}</span>
+          </button>
+
+          {/* Divider */}
+          <div className="relative mb-4">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase tracking-wider">
+              <span className="bg-card px-2 text-muted-foreground">or with email</span>
+            </div>
+          </div>
+
           {mode === "login" ? (
             <form onSubmit={handleLogin} className="space-y-4">
               {/* Email */}
@@ -158,7 +231,7 @@ export default function Login() {
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || googleLoading}
                 className="w-full h-11 bg-primary text-primary-foreground font-medium rounded-xl text-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
                 {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Signing in...</> : "Sign In"}
@@ -244,7 +317,7 @@ export default function Login() {
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || googleLoading}
                 className="w-full h-11 bg-primary text-primary-foreground font-medium rounded-xl text-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
                 {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating account...</> : "Create Account"}
