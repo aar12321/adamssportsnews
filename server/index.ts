@@ -11,12 +11,17 @@ declare module 'http' {
     rawBody: unknown
   }
 }
+// Cap JSON/urlencoded bodies so a malicious client can't exhaust memory.
+// 256KB is ample for our largest current payload (roster validation) and
+// still catches obvious abuse cases.
+const MAX_BODY_SIZE = "256kb";
 app.use(express.json({
+  limit: MAX_BODY_SIZE,
   verify: (req, _res, buf) => {
     req.rawBody = buf;
   }
 }));
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: MAX_BODY_SIZE }));
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -51,12 +56,17 @@ app.use((req, res, next) => {
 (async () => {
   const server = await registerRoutes(app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+    const status = err?.status || err?.statusCode || 500;
+    const message = err?.message || "Internal Server Error";
 
-    res.status(status).json({ message });
-    throw err;
+    // Log first so we have a trace even if the response write races.
+    // Do NOT re-throw — throwing after res.json() used to crash the
+    // process instead of letting Express finish the response.
+    console.error(`[${req.method} ${req.path}] ${status} ${message}`, err?.stack || err);
+    if (!res.headersSent) {
+      res.status(status).json({ error: message });
+    }
   });
 
   // importantly only setup vite in development and after
