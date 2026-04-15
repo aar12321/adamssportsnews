@@ -351,6 +351,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Server-side echo of the client's roster-add validation, so tampering with
+  // localStorage can't produce a roster that would normally be rejected.
+  app.post("/api/fantasy/roster/validate", (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const { roster, player, sport } = body as {
+        roster?: unknown; player?: unknown; sport?: unknown;
+      };
+      if (typeof sport !== "string" || !sport) {
+        return res.status(400).json({ error: "sport is required" });
+      }
+      if (!Array.isArray(roster)) {
+        return res.status(400).json({ error: "roster must be an array" });
+      }
+      if (roster.length > 50) {
+        return res.status(400).json({ error: "roster too large" });
+      }
+      if (!player || typeof player !== "object") {
+        return res.status(400).json({ error: "player is required" });
+      }
+      const p = player as { id?: unknown; position?: unknown; sport?: unknown };
+      if (typeof p.id !== "string" || !p.id) {
+        return res.status(400).json({ error: "player.id is required" });
+      }
+      // Coerce into the plain shape the validator accepts.
+      const cleanRoster = (roster as any[]).map((r) => ({
+        id: String(r?.id ?? ""),
+        position: typeof r?.position === "string" ? r.position : undefined,
+        sport: typeof r?.sport === "string" ? r.sport : undefined,
+      })).filter((r) => r.id);
+      const cleanPlayer = {
+        id: p.id,
+        position: typeof p.position === "string" ? p.position : undefined,
+        sport: typeof p.sport === "string" ? p.sport : undefined,
+      };
+      const result = fantasyService.validateRosterAddition(cleanRoster, cleanPlayer, sport);
+      res.json(result);
+    } catch (error) {
+      console.error("Error validating roster addition:", error);
+      res.status(500).json({ error: "Failed to validate roster addition" });
+    }
+  });
+
   app.post("/api/fantasy/trade/analyze", (req, res) => {
     try {
       const { giving, receiving } = req.body;
