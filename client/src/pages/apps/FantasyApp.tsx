@@ -698,6 +698,348 @@ function Stat({ label, value, tone }: { label: string; value: string; tone: "gre
   );
 }
 
+/**
+ * Matchup simulator — lets a user build one or more named "opponent"
+ * lineups (e.g. their friend's team in a non-app league) and see their
+ * own roster's projected/average-point total side-by-side with the
+ * opponent's. Deliberately simple: no real-league state, just a sandbox
+ * for asking "if I play this lineup on Sunday, what do I beat?"
+ */
+function MatchupSimulator({
+  sportKey,
+  roster,
+  userId,
+}: {
+  sportKey: string;
+  roster: any[];
+  userId: string;
+}) {
+  const queryClient = useQueryClient();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 250);
+
+  const enabled = !!userId;
+
+  const { data: opponents } = useQuery({
+    queryKey: ["/api/fantasy/opponents", sportKey, userId],
+    queryFn: () =>
+      fetchJson<any[]>(`/api/fantasy/opponents?sport=${encodeURIComponent(sportKey)}`),
+    enabled,
+  });
+
+  const { data: searchResults } = useQuery({
+    queryKey: ["opponent-search", sportKey, debouncedSearch],
+    queryFn: () =>
+      fetchJson<any[]>(
+        `/api/fantasy/players/search?q=${encodeURIComponent(debouncedSearch)}&sport=${encodeURIComponent(sportKey)}`,
+      ),
+    enabled: debouncedSearch.trim().length > 1,
+    staleTime: 60_000,
+  });
+
+  // Reset the selection when the sport changes so we don't show an
+  // opponent from another sport.
+  useEffect(() => {
+    setSelectedId(null);
+    setSearch("");
+  }, [sportKey]);
+
+  const createMut = useMutation({
+    mutationFn: (name: string) =>
+      apiRequest<any>("POST", "/api/fantasy/opponents", { sport: sportKey, name }),
+    onSuccess: (opp) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fantasy/opponents", sportKey, userId] });
+      setSelectedId(opp?.id ?? null);
+      setNewName("");
+    },
+  });
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/fantasy/opponents/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fantasy/opponents", sportKey, userId] });
+      setSelectedId(null);
+    },
+  });
+  const addPlayerMut = useMutation({
+    mutationFn: ({ id, player }: { id: string; player: any }) =>
+      apiRequest<any>("POST", `/api/fantasy/opponents/${id}/add-player`, { player }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fantasy/opponents", sportKey, userId] });
+    },
+  });
+  const removePlayerMut = useMutation({
+    mutationFn: ({ id, playerId }: { id: string; playerId: string }) =>
+      apiRequest<any>("POST", `/api/fantasy/opponents/${id}/remove-player`, { playerId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fantasy/opponents", sportKey, userId] });
+    },
+  });
+
+  const selected = useMemo(
+    () => (opponents || []).find((o: any) => o.id === selectedId) || null,
+    [opponents, selectedId],
+  );
+
+  // Roster totals for matchup math
+  const myProj = roster.reduce((s, p: any) => s + (p.projectedPoints || 0), 0);
+  const myAvg = roster.reduce((s, p: any) => s + (p.averagePoints || 0), 0);
+  const oppProj = (selected?.players || []).reduce((s: number, p: any) => s + (p.projectedPoints || 0), 0);
+  const oppAvg = (selected?.players || []).reduce((s: number, p: any) => s + (p.averagePoints || 0), 0);
+  const projDiff = myProj - oppProj;
+  const avgDiff = myAvg - oppAvg;
+
+  const oppPlayerIds = new Set((selected?.players || []).map((p: any) => p.id));
+  const candidates = (searchResults || []).filter((p: any) => !oppPlayerIds.has(p.id));
+
+  if (!userId) {
+    return (
+      <div className="glass-card p-5 text-center">
+        <p className="text-sm font-medium">Sign in to simulate matchups</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          Saved opponent lineups are tied to your account.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Opponent picker + create */}
+      <div className="glass-card p-4">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div>
+            <p className="font-bold text-foreground flex items-center gap-2">
+              <Activity className="w-4 h-4 text-primary" />
+              Simulate a matchup
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Build an opponent lineup and see how your roster stacks up.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mb-3">
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Opponent team name (e.g. Alex's Team)"
+            maxLength={48}
+            className="input-field flex-1 text-sm"
+          />
+          <button
+            onClick={() => newName.trim() && createMut.mutate(newName.trim())}
+            disabled={!newName.trim() || createMut.isPending}
+            className="btn-primary text-xs px-3 disabled:opacity-50"
+          >
+            <Plus className="w-3.5 h-3.5 inline mr-1" />
+            New
+          </button>
+        </div>
+
+        {createMut.error ? (
+          <p className="text-xs text-red-400 mb-2">
+            {String(createMut.error.message || "Could not create")}
+          </p>
+        ) : null}
+
+        {opponents && opponents.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {opponents.map((o: any) => (
+              <button
+                key={o.id}
+                onClick={() => setSelectedId(o.id === selectedId ? null : o.id)}
+                className={cn(
+                  "text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1.5",
+                  selectedId === o.id
+                    ? "bg-primary/15 border-primary/40 text-foreground"
+                    : "bg-muted border-transparent hover:border-foreground/20",
+                )}
+              >
+                <Users className="w-3 h-3" />
+                <span className="font-medium">{o.name}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {o.players.length}p
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            No opponents yet. Name one above and add players to it.
+          </p>
+        )}
+      </div>
+
+      {/* Matchup view */}
+      {selected && (
+        <>
+          <div className="glass-card p-4">
+            <div className="grid grid-cols-3 gap-3 items-center mb-3">
+              <div className="text-center">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">You</p>
+                <p className="text-lg font-bold num">{myProj.toFixed(1)}</p>
+                <p className="text-[10px] text-muted-foreground">proj pts</p>
+              </div>
+              <div className="text-center">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Δ proj
+                </p>
+                <p
+                  className={cn(
+                    "text-xl font-bold num",
+                    projDiff > 0
+                      ? "text-green-400"
+                      : projDiff < 0
+                      ? "text-red-400"
+                      : "text-foreground",
+                  )}
+                >
+                  {projDiff > 0 ? "+" : ""}
+                  {projDiff.toFixed(1)}
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  Δ avg {avgDiff > 0 ? "+" : ""}
+                  {avgDiff.toFixed(1)}
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground truncate">
+                  {selected.name}
+                </p>
+                <p className="text-lg font-bold num">{oppProj.toFixed(1)}</p>
+                <p className="text-[10px] text-muted-foreground">proj pts</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <p
+                className={cn(
+                  "text-sm font-semibold",
+                  projDiff > 0
+                    ? "text-green-400"
+                    : projDiff < 0
+                    ? "text-red-400"
+                    : "text-yellow-400",
+                )}
+              >
+                {projDiff > 0
+                  ? "Projected to win"
+                  : projDiff < 0
+                  ? "Projected to lose"
+                  : "Projected tie"}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    if (confirm(`Delete opponent "${selected.name}"?`)) {
+                      deleteMut.mutate(selected.id);
+                    }
+                  }}
+                  className="text-xs text-muted-foreground hover:text-red-400"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Opponent roster */}
+          <div className="glass-card p-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+              Opponent lineup ({selected.players.length})
+            </p>
+            {selected.players.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Use the search below to fill their lineup.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {selected.players.map((p: any) => (
+                  <div key={p.id} className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-muted/30">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{p.name}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {normalizePosition(p.position, sportKey) || p.position}
+                        {p.team ? ` · ${p.team.split(" ").slice(-1)[0]}` : ""}
+                      </p>
+                    </div>
+                    <div className="text-right mr-2">
+                      <p className="text-xs font-bold num">
+                        {(p.projectedPoints ?? 0).toFixed(1)}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">proj</p>
+                    </div>
+                    <button
+                      onClick={() =>
+                        removePlayerMut.mutate({ id: selected.id, playerId: p.id })
+                      }
+                      className="w-6 h-6 rounded bg-muted hover:bg-red-500/20 hover:text-red-400 flex items-center justify-center"
+                      title="Remove"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Player search to add */}
+          <div className="glass-card p-4">
+            <div className="relative mb-2">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search any player to add to their lineup…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="input-field pl-8 text-sm"
+              />
+            </div>
+            {addPlayerMut.error ? (
+              <p className="text-xs text-red-400 mb-2">
+                {String(addPlayerMut.error.message || "Could not add")}
+              </p>
+            ) : null}
+            {debouncedSearch.trim().length > 1 && (
+              <div className="space-y-1 max-h-60 overflow-y-auto">
+                {candidates.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-2">
+                    No new matches.
+                  </p>
+                ) : (
+                  candidates.slice(0, 20).map((p: any) => (
+                    <button
+                      key={p.id}
+                      onClick={() => addPlayerMut.mutate({ id: selected.id, player: p })}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-transparent bg-muted/30 hover:border-foreground/20 text-left"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{p.name}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {normalizePosition(p.position, sportKey) || p.position}
+                          {p.team ? ` · ${p.team.split(" ").slice(-1)[0]}` : ""}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs font-bold num">
+                          {(p.averagePoints ?? 0).toFixed(1)}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">avg</p>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function FantasyApp() {
   const { user } = useAuth();
   const { preferences } = useUserPreferences();
@@ -706,7 +1048,7 @@ export default function FantasyApp() {
   const userId = user?.id || "";
   const userSports = useMemo(() => getUserAppSports(preferences.favoriteSports), [preferences.favoriteSports]);
   const [selectedSport, setSelectedSport] = useState(userSports[0]?.id || "basketball");
-  const [activeTab, setActiveTab] = useState<"roster" | "players" | "waiver" | "injuries" | "trade">("roster");
+  const [activeTab, setActiveTab] = useState<"roster" | "players" | "waiver" | "injuries" | "trade" | "simulate">("roster");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
   const debouncedSearch = useDebouncedValue(searchQuery, 300);
@@ -879,6 +1221,7 @@ export default function FantasyApp() {
               { key: "waiver", label: "Waiver Wire", Icon: Target },
               { key: "injuries", label: "Injuries", Icon: AlertCircle },
               { key: "trade", label: "Trade", Icon: ArrowLeftRight },
+              { key: "simulate", label: "Simulate", Icon: Activity },
             ].map(({ key, label, Icon }) => (
               <button
                 key={key}
@@ -1348,6 +1691,15 @@ export default function FantasyApp() {
           {/* Trade tab */}
           {activeTab === "trade" && (
             <TradeAnalyzer sportKey={selectedSport} roster={roster} />
+          )}
+
+          {/* Simulate tab — matchup projection against a mock opponent */}
+          {activeTab === "simulate" && (
+            <MatchupSimulator
+              sportKey={selectedSport}
+              roster={roster}
+              userId={userId}
+            />
           )}
         </div>
 

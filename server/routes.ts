@@ -486,6 +486,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // --- Opponent mock lineups (matchup simulation) -----------------------
+
+  app.get("/api/fantasy/opponents", requireUser, (req, res) => {
+    try {
+      const { sport, error } = requireSport(req.query.sport);
+      if (error || !sport) return res.status(400).json({ error });
+      res.json(fantasyService.listOpponents(req.userId!, sport));
+    } catch (err) {
+      res.status(500).json({ error: "Failed to list opponents" });
+    }
+  });
+
+  app.post("/api/fantasy/opponents", requireUser, (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const { sport, error } = requireSport(body.sport);
+      if (error || !sport) return res.status(400).json({ error });
+      const name = cleanText(body.name, 48) || "Opponent";
+      const result = fantasyService.createOpponent(req.userId!, sport, name);
+      if (!result.ok) return res.status(400).json(result);
+      res.json(result.opponent);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to create opponent" });
+    }
+  });
+
+  app.delete("/api/fantasy/opponents/:id", requireUser, (req, res) => {
+    try {
+      const id = cleanText(req.params.id, 64);
+      if (!id) return res.status(400).json({ error: "opponent id required" });
+      const ok = fantasyService.deleteOpponent(req.userId!, id);
+      if (!ok) return res.status(404).json({ error: "Opponent not found" });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to delete opponent" });
+    }
+  });
+
+  app.post("/api/fantasy/opponents/:id/add-player", requireUser, (req, res) => {
+    try {
+      const id = cleanText(req.params.id, 64);
+      if (!id) return res.status(400).json({ error: "opponent id required" });
+      const player = req.body?.player;
+      if (!player || typeof player !== "object" || typeof player.id !== "string") {
+        return res.status(400).json({ error: "player object with id required" });
+      }
+      const result = fantasyService.addPlayerToOpponent(req.userId!, id, player);
+      if (!result.ok) return res.status(400).json(result);
+      res.json(result.opponent);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to add player to opponent" });
+    }
+  });
+
+  app.post("/api/fantasy/opponents/:id/remove-player", requireUser, (req, res) => {
+    try {
+      const id = cleanText(req.params.id, 64);
+      if (!id) return res.status(400).json({ error: "opponent id required" });
+      const playerId = cleanText(req.body?.playerId, 64);
+      if (!playerId) return res.status(400).json({ error: "playerId required" });
+      const updated = fantasyService.removePlayerFromOpponent(req.userId!, id, playerId);
+      if (!updated) return res.status(404).json({ error: "Opponent not found" });
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to remove player from opponent" });
+    }
+  });
+
+  app.post("/api/fantasy/opponents/:id/rename", requireUser, (req, res) => {
+    try {
+      const id = cleanText(req.params.id, 64);
+      if (!id) return res.status(400).json({ error: "opponent id required" });
+      const name = cleanText(req.body?.name, 48);
+      if (!name) return res.status(400).json({ error: "name required" });
+      const updated = fantasyService.renameOpponent(req.userId!, id, name);
+      if (!updated) return res.status(404).json({ error: "Opponent not found" });
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to rename opponent" });
+    }
+  });
+
   // Server-side echo of the client's roster-add validation, so tampering with
   // localStorage can't produce a roster that would normally be rejected.
   app.post("/api/fantasy/roster/validate", (req, res) => {

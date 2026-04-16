@@ -1,10 +1,11 @@
+import { randomUUID } from "crypto";
 import type { FantasyPlayer, FantasyTeam, TradeAnalysis, WaiverTarget, PlayerStats } from "@shared/schema";
 import {
   validateRosterAddition,
   canFitFantasyRoster,
   type RosterValidationResult,
 } from "@shared/fantasyRules";
-import { rosterRepo } from "./db/repos";
+import { rosterRepo, opponentsRepo, type OpponentRecord } from "./db/repos";
 
 // Mock player database with realistic data
 const playerDatabase: FantasyPlayer[] = [
@@ -342,6 +343,80 @@ export class FantasyService {
 
   resetRoster(userId: string, sport: string): void {
     rosterRepo.clearSport(userId, sport);
+  }
+
+  // --- Opponent mock lineups (for matchup simulation) --------------------
+
+  private readonly MAX_OPPONENTS_PER_SPORT = 8;
+
+  listOpponents(userId: string, sport: string): OpponentRecord[] {
+    return opponentsRepo.listByUserSport(userId, sport);
+  }
+
+  createOpponent(userId: string, sport: string, name: string):
+    | { ok: true; opponent: OpponentRecord }
+    | { ok: false; reason: string } {
+    const existing = opponentsRepo.listByUserSport(userId, sport);
+    if (existing.length >= this.MAX_OPPONENTS_PER_SPORT) {
+      return { ok: false, reason: `Max ${this.MAX_OPPONENTS_PER_SPORT} opponents per sport` };
+    }
+    const now = new Date().toISOString();
+    const opponent: OpponentRecord = {
+      id: randomUUID(),
+      userId,
+      sport,
+      name: name.trim().slice(0, 48) || "Opponent",
+      players: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    opponentsRepo.create(opponent);
+    return { ok: true, opponent };
+  }
+
+  deleteOpponent(userId: string, opponentId: string): boolean {
+    const o = opponentsRepo.get(opponentId);
+    if (!o || o.userId !== userId) return false;
+    opponentsRepo.delete(opponentId);
+    return true;
+  }
+
+  addPlayerToOpponent(
+    userId: string,
+    opponentId: string,
+    player: FantasyPlayer,
+  ): { ok: true; opponent: OpponentRecord } | { ok: false; reason: string } {
+    const opponent = opponentsRepo.get(opponentId);
+    if (!opponent || opponent.userId !== userId) {
+      return { ok: false, reason: "Opponent not found" };
+    }
+    // Reuse the same validator we use for the real roster so the opponent
+    // lineup is also legal (positions match, no duplicates, fits the sport).
+    const result = validateRosterAddition(opponent.players, player, opponent.sport);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    const updated = opponentsRepo.update(opponentId, {
+      players: [...opponent.players, player],
+    });
+    return { ok: true, opponent: updated! };
+  }
+
+  removePlayerFromOpponent(
+    userId: string,
+    opponentId: string,
+    playerId: string,
+  ): OpponentRecord | null {
+    const opponent = opponentsRepo.get(opponentId);
+    if (!opponent || opponent.userId !== userId) return null;
+    const players = opponent.players.filter((p) => p.id !== playerId);
+    return opponentsRepo.update(opponentId, { players }) ?? null;
+  }
+
+  renameOpponent(userId: string, opponentId: string, name: string): OpponentRecord | null {
+    const opponent = opponentsRepo.get(opponentId);
+    if (!opponent || opponent.userId !== userId) return null;
+    return opponentsRepo.update(opponentId, {
+      name: name.trim().slice(0, 48) || opponent.name,
+    }) ?? null;
   }
 }
 

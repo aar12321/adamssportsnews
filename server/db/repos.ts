@@ -287,6 +287,55 @@ export const leaguesRepo = {
   },
 };
 
+// --- Opponent mock lineups ------------------------------------------------
+//
+// Each user can save a handful of named "opponent" rosters per sport —
+// used to simulate a weekly matchup against a friend / rival team they
+// don't control. Data shape is deliberately parallel to roster_repo.
+
+export interface OpponentRecord {
+  id: string;
+  userId: string;
+  sport: string;
+  name: string;
+  players: FantasyPlayer[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+const opponentsStore = new JsonStore<{ opponents: OpponentRecord[] }>("fantasy-opponents", () => ({
+  opponents: [],
+}));
+registerStore(opponentsStore);
+
+export const opponentsRepo = {
+  listByUserSport(userId: string, sport: string): OpponentRecord[] {
+    return opponentsStore.read().opponents.filter((o) => o.userId === userId && o.sport === sport);
+  },
+  get(id: string): OpponentRecord | undefined {
+    return opponentsStore.read().opponents.find((o) => o.id === id);
+  },
+  create(opponent: OpponentRecord): OpponentRecord {
+    const data = opponentsStore.read();
+    data.opponents.push(opponent);
+    opponentsStore.save();
+    return opponent;
+  },
+  update(id: string, patch: Partial<OpponentRecord>): OpponentRecord | undefined {
+    const data = opponentsStore.read();
+    const idx = data.opponents.findIndex((o) => o.id === id);
+    if (idx === -1) return undefined;
+    data.opponents[idx] = { ...data.opponents[idx], ...patch, updatedAt: new Date().toISOString() };
+    opponentsStore.save();
+    return data.opponents[idx];
+  },
+  delete(id: string): void {
+    const data = opponentsStore.read();
+    data.opponents = data.opponents.filter((o) => o.id !== id);
+    opponentsStore.save();
+  },
+};
+
 // --- Push subscriptions ---------------------------------------------------
 
 export interface PushSubscriptionRecord {
