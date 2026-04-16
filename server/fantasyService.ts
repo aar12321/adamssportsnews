@@ -161,16 +161,34 @@ export class FantasyService {
     return { trend, analysis, recommendation };
   }
 
+  /**
+   * Analyze a proposed trade. Accepts either bare player IDs (resolved
+   * against the local DB + waiver pool) OR full player objects — the
+   * latter lets the client pass in ESPN-sourced players that aren't in
+   * our local DB, so trades involving any searchable player work.
+   */
   analyzeTrade(
-    givingPlayerIds: string[],
-    receivingPlayerIds: string[]
+    givingInput: Array<string | FantasyPlayer>,
+    receivingInput: Array<string | FantasyPlayer>,
   ): TradeAnalysis {
-    const giving = givingPlayerIds
-      .map(id => this.getPlayer(id))
-      .filter(Boolean) as FantasyPlayer[];
-    const receiving = receivingPlayerIds
-      .map(id => this.getPlayer(id))
-      .filter(Boolean) as FantasyPlayer[];
+    const resolve = (entry: string | FantasyPlayer): FantasyPlayer | null => {
+      if (typeof entry === "string") return this.getPlayer(entry) ?? null;
+      // Trust the caller's player object but fill in any missing numeric /
+      // metadata fields so downstream code doesn't NaN out.
+      const e = entry as Partial<FantasyPlayer>;
+      return {
+        ...e,
+        averagePoints: typeof e.averagePoints === "number" ? e.averagePoints : 0,
+        weeklyPoints: typeof e.weeklyPoints === "number" ? e.weeklyPoints : 0,
+        projectedPoints: typeof e.projectedPoints === "number" ? e.projectedPoints : 0,
+        seasonPoints: typeof e.seasonPoints === "number" ? e.seasonPoints : 0,
+        status: e.status ?? "active",
+        stats: e.stats ?? {},
+        recentNews: e.recentNews ?? [],
+      } as FantasyPlayer;
+    };
+    const giving = givingInput.map(resolve).filter(Boolean) as FantasyPlayer[];
+    const receiving = receivingInput.map(resolve).filter(Boolean) as FantasyPlayer[];
 
     const givingValue = giving.reduce((acc, p) => acc + p.averagePoints, 0);
     const receivingValue = receiving.reduce((acc, p) => acc + p.averagePoints, 0);

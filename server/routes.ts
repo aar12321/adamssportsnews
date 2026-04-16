@@ -533,7 +533,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { giving, receiving } = req.body ?? {};
       if (!Array.isArray(giving) || !Array.isArray(receiving)) {
-        return res.status(400).json({ error: "giving and receiving must be arrays of player IDs" });
+        return res.status(400).json({ error: "giving and receiving must be arrays" });
       }
       if (giving.length === 0 || receiving.length === 0) {
         return res.status(400).json({ error: "giving and receiving cannot be empty" });
@@ -541,10 +541,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (giving.length > 20 || receiving.length > 20) {
         return res.status(400).json({ error: "trade too large (max 20 per side)" });
       }
-      const cleanGiving = giving.filter((g) => typeof g === "string" && g.length > 0 && g.length <= 64);
-      const cleanReceiving = receiving.filter((g) => typeof g === "string" && g.length > 0 && g.length <= 64);
+      // Each entry may be a string (player id, resolved against the local
+      // DB) or a player object (passed through as-is so ESPN-sourced
+      // players trade correctly).
+      const normalize = (entry: unknown): string | any | null => {
+        if (typeof entry === "string") {
+          if (entry.length === 0 || entry.length > 64) return null;
+          return entry;
+        }
+        if (entry && typeof entry === "object") {
+          const e = entry as { id?: unknown };
+          if (typeof e.id !== "string" || !e.id || e.id.length > 64) return null;
+          return entry;
+        }
+        return null;
+      };
+      const cleanGiving = (giving as unknown[]).map(normalize).filter((x): x is string | any => x !== null);
+      const cleanReceiving = (receiving as unknown[]).map(normalize).filter((x): x is string | any => x !== null);
       if (cleanGiving.length !== giving.length || cleanReceiving.length !== receiving.length) {
-        return res.status(400).json({ error: "player IDs must be non-empty strings (<= 64 chars)" });
+        return res.status(400).json({ error: "each entry must be a player id or a player object with an id" });
       }
       const analysis = fantasyService.analyzeTrade(cleanGiving, cleanReceiving);
       res.json(analysis);

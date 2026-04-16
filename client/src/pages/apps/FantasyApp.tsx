@@ -358,134 +358,342 @@ function PlayerCard({ player, compact = false, onAdd, onRemove, isOnRoster, onSe
   );
 }
 
-function TradeAnalyzer({ sportKey }: { sportKey: string }) {
-  const [givingIds, setGivingIds] = useState<string[]>([]);
-  const [receivingIds, setReceivingIds] = useState<string[]>([]);
-  const [step, setStep] = useState<"giving" | "receiving" | "result">("giving");
+/**
+ * Trade analyzer.
+ *
+ * The old version showed a static 24-player slice and selected by id only,
+ * which meant (a) most players weren't reachable and (b) any player sourced
+ * from the ESPN leader merge couldn't be analyzed because their id wasn't
+ * in the local DB. This rewrite:
+ *
+ *   - Starts from the user's roster for the "Giving" side — one-click
+ *     add/remove of players you actually own.
+ *   - Lets the "Receiving" side search the full player universe via the
+ *     same /api/fantasy/players/search endpoint the roster builder uses.
+ *     Every player is reachable.
+ *   - Sends full player objects (not just ids) to the server so
+ *     ESPN-sourced players analyze correctly.
+ *   - Shows before/after roster projection numbers inline so the user sees
+ *     the real delta, not just the server's verbal "accept/decline".
+ */
+function TradeAnalyzer({
+  sportKey,
+  roster,
+}: {
+  sportKey: string;
+  roster: any[];
+}) {
+  const [giving, setGiving] = useState<any[]>([]);
+  const [receiving, setReceiving] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(searchQuery, 250);
+  const [showAnalysis, setShowAnalysis] = useState(false);
 
-  const { data: players } = useQuery({
-    queryKey: ["/api/fantasy/players", sportKey],
-    queryFn: async () => {
-      const res = await fetch(`/api/fantasy/players?sport=${encodeURIComponent(sportKey)}`);
-      return res.json();
-    },
+  // Reset when sport changes
+  useEffect(() => {
+    setGiving([]);
+    setReceiving([]);
+    setSearchQuery("");
+    setShowAnalysis(false);
+  }, [sportKey]);
+
+  // Searchable pool: query the server. Everything in /api/fantasy/players/search
+  // is reachable — no arbitrary slice.
+  const { data: searchResults, isFetching: isSearching } = useQuery({
+    queryKey: ["trade-search", sportKey, debouncedQuery],
+    queryFn: () =>
+      fetchJson<any[]>(
+        `/api/fantasy/players/search?q=${encodeURIComponent(debouncedQuery)}&sport=${encodeURIComponent(sportKey)}`,
+      ),
+    enabled: debouncedQuery.trim().length > 1,
+    staleTime: 60_000,
   });
 
-  const { data: analysis, isLoading } = useQuery({
-    queryKey: ["/api/fantasy/trade/analyze", givingIds.join(","), receivingIds.join(",")],
-    queryFn: async () => {
-      const res = await fetch("/api/fantasy/trade/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ giving: givingIds, receiving: receivingIds }),
-      });
-      return res.json();
-    },
-    enabled: step === "result" && givingIds.length > 0 && receivingIds.length > 0,
-  });
+  const givingIds = new Set(giving.map((p) => p.id));
+  const receivingIds = new Set(receiving.map((p) => p.id));
 
-  const togglePlayer = (id: string, side: "giving" | "receiving") => {
-    if (side === "giving") {
-      setGivingIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-    } else {
-      setReceivingIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-    }
+  const toggleGiving = (player: any) => {
+    setShowAnalysis(false);
+    setGiving((prev) =>
+      prev.some((p) => p.id === player.id)
+        ? prev.filter((p) => p.id !== player.id)
+        : [...prev, player],
+    );
+  };
+  const toggleReceiving = (player: any) => {
+    setShowAnalysis(false);
+    setReceiving((prev) =>
+      prev.some((p) => p.id === player.id)
+        ? prev.filter((p) => p.id !== player.id)
+        : [...prev, player],
+    );
   };
 
-  useEffect(() => {
-    setGivingIds([]);
-    setReceivingIds([]);
-    setStep("giving");
-  }, [sportKey]);
+  const analysisMut = useMutation({
+    mutationFn: () =>
+      apiRequest<any>("POST", "/api/fantasy/trade/analyze", {
+        giving,
+        receiving,
+      }),
+  });
+
+  const runAnalysis = () => {
+    setShowAnalysis(true);
+    analysisMut.mutate();
+  };
+
+  // Client-side projection: what happens to your roster after the swap?
+  const rosterProjTotal = useMemo(
+    () => roster.reduce((s, p) => s + (p.projectedPoints || 0), 0),
+    [roster],
+  );
+  const rosterAvgTotal = useMemo(
+    () => roster.reduce((s, p) => s + (p.averagePoints || 0), 0),
+    [roster],
+  );
+  const givingProj = giving.reduce((s, p) => s + (p.projectedPoints || 0), 0);
+  const givingAvg = giving.reduce((s, p) => s + (p.averagePoints || 0), 0);
+  const receivingProj = receiving.reduce((s, p) => s + (p.projectedPoints || 0), 0);
+  const receivingAvg = receiving.reduce((s, p) => s + (p.averagePoints || 0), 0);
+  const projDelta = receivingProj - givingProj;
+  const avgDelta = receivingAvg - givingAvg;
+  const rosterProjAfter = rosterProjTotal - givingProj + receivingProj;
+
+  // Available "receiving" candidates: search results, minus players already
+  // on the user's roster (can't receive someone you already have) and
+  // minus anyone already on the giving side.
+  const rosterIdSet = new Set(roster.map((p: any) => p.id));
+  const receivingCandidates = (searchResults || []).filter(
+    (p: any) => !rosterIdSet.has(p.id) && !givingIds.has(p.id),
+  );
+
+  const analysis = analysisMut.data;
+  const analyzable = giving.length > 0 && receiving.length > 0;
 
   return (
     <div className="glass-card p-5 space-y-4">
-      <h3 className="font-bold text-foreground flex items-center gap-2">
-        <ArrowLeftRight className="w-4 h-4 text-purple-400" />
-        Trade Analyzer
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold text-foreground flex items-center gap-2">
+          <ArrowLeftRight className="w-4 h-4 text-purple-400" />
+          Trade Analyzer
+        </h3>
+        {(giving.length > 0 || receiving.length > 0) && (
+          <button
+            onClick={() => {
+              setGiving([]); setReceiving([]); setShowAnalysis(false); setSearchQuery("");
+            }}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </button>
+        )}
+      </div>
 
-      {step !== "result" ? (
-        <>
-          <div className="tab-bar">
-            <button className={cn("tab-item", step === "giving" && "active")} onClick={() => setStep("giving")}>
-              Giving ({givingIds.length})
-            </button>
-            <button className={cn("tab-item", step === "receiving" && "active")} onClick={() => setStep("receiving")}>
-              Receiving ({receivingIds.length})
-            </button>
-          </div>
+      {roster.length === 0 && (
+        <div className="p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5 text-xs text-yellow-300">
+          Build a roster first — trades are analyzed against the players you own.
+        </div>
+      )}
 
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {(players || []).slice(0, 24).map((p: any) => {
-              const currentIds = step === "giving" ? givingIds : receivingIds;
-              const isSelected = currentIds.includes(p.id);
+      {/* Giving side — drawn from the user's roster */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+          You give ({giving.length})
+        </p>
+        {roster.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Nothing on your roster yet.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {roster.map((p: any) => {
+              const on = givingIds.has(p.id);
               return (
                 <button
                   key={p.id}
-                  onClick={() => togglePlayer(p.id, step)}
+                  onClick={() => toggleGiving(p)}
                   className={cn(
-                    "w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all",
-                    isSelected ? "bg-primary/15 border-primary/40" : "bg-muted/30 border-transparent hover:border-primary/30"
+                    "text-xs px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5",
+                    on
+                      ? "bg-red-500/15 border-red-500/40 text-red-300"
+                      : "bg-muted border-transparent hover:border-foreground/20",
                   )}
+                  title={`${p.name} · ${p.position} · avg ${(p.averagePoints ?? 0).toFixed(1)}`}
                 >
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{p.name}</p>
-                    <p className="text-xs text-muted-foreground">{p.position} · {p.team.split(" ").slice(-1)[0]}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-foreground num">{p.averagePoints != null ? p.averagePoints.toFixed(1) : "\u2014"}</p>
-                    <p className="text-xs text-muted-foreground">avg/wk</p>
-                  </div>
+                  <span className="font-medium">{p.name}</span>
+                  <span className="text-[10px] text-muted-foreground">{normalizePosition(p.position, sportKey) || p.position}</span>
+                  <span className="text-[10px] num">{(p.averagePoints ?? 0).toFixed(1)}</span>
                 </button>
               );
             })}
           </div>
+        )}
+      </div>
 
-          {givingIds.length > 0 && receivingIds.length > 0 && (
-            <button onClick={() => setStep("result")} className="btn-primary w-full">
-              Analyze Trade
-            </button>
-          )}
-        </>
-      ) : (
-        <>
-          {isLoading ? (
-            <div className="text-center py-6">
-              <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin mx-auto" />
-            </div>
-          ) : analysis ? (
-            <div className="space-y-3">
-              <div className={cn(
-                "p-4 rounded-xl border text-center",
-                analysis.recommendation === "accept" ? "bg-green-500/10 border-green-500/20" :
-                analysis.recommendation === "decline" ? "bg-red-500/10 border-red-500/20" :
-                "bg-yellow-500/10 border-yellow-500/20"
-              )}>
-                <p className={cn("text-lg font-bold",
-                  analysis.recommendation === "accept" ? "text-green-400" :
-                  analysis.recommendation === "decline" ? "text-red-400" :
-                  "text-yellow-400"
-                )}>
-                  {analysis.recommendation === "accept" ? "✓ Accept Trade" :
-                   analysis.recommendation === "decline" ? "✗ Decline Trade" :
-                   "~ Neutral Trade"}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {analysis.valueDifference > 0 ? "+" : ""}{analysis.valueDifference.toFixed(1)} pts/wk net gain
-                </p>
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed">{analysis.analysis}</p>
-              {analysis.factors?.map((f: string, i: number) => (
-                <p key={i} className="text-xs text-muted-foreground border-l-2 border-primary/30 pl-2">{f}</p>
-              ))}
-              <button onClick={() => { setStep("giving"); setGivingIds([]); setReceivingIds([]); }} className="btn-ghost w-full">
-                New Analysis
+      {/* Receiving side — search the entire player universe */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+          You receive ({receiving.length})
+        </p>
+        {receiving.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {receiving.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => toggleReceiving(p)}
+                className="text-xs px-2.5 py-1.5 rounded-lg border border-green-500/40 bg-green-500/15 text-green-300 flex items-center gap-1.5"
+              >
+                <span className="font-medium">{p.name}</span>
+                <span className="text-[10px] text-muted-foreground">{normalizePosition(p.position, sportKey) || p.position}</span>
+                <span className="text-[10px] num">{(p.averagePoints ?? 0).toFixed(1)}</span>
+                <X className="w-3 h-3 opacity-70" />
               </button>
-            </div>
-          ) : null}
-        </>
+            ))}
+          </div>
+        )}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search any player by name, team, or position…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="input-field pl-8 text-sm"
+          />
+        </div>
+        {debouncedQuery.trim().length > 1 && (
+          <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+            {isSearching && !searchResults ? (
+              <p className="text-xs text-muted-foreground py-2">Searching…</p>
+            ) : receivingCandidates.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-2">
+                No matches for &quot;{debouncedQuery}&quot;.
+              </p>
+            ) : (
+              receivingCandidates.slice(0, 20).map((p: any) => {
+                const on = receivingIds.has(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => toggleReceiving(p)}
+                    className={cn(
+                      "w-full flex items-center justify-between px-3 py-2 rounded-lg border text-left",
+                      on
+                        ? "bg-green-500/10 border-green-500/30"
+                        : "bg-muted/30 border-transparent hover:border-foreground/20",
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{p.name}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {normalizePosition(p.position, sportKey) || p.position}
+                        {p.team ? ` · ${p.team.split(" ").slice(-1)[0]}` : ""}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-bold num">
+                        {(p.averagePoints ?? 0).toFixed(1)}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">avg/wk</p>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Inline live deltas — computed client-side, always up to date */}
+      {analyzable && (
+        <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-muted/30 border border-border">
+          <Stat
+            label="Δ proj/wk"
+            value={`${projDelta > 0 ? "+" : ""}${projDelta.toFixed(1)}`}
+            tone={projDelta > 0.5 ? "green" : projDelta < -0.5 ? "red" : "neutral"}
+          />
+          <Stat
+            label="Δ avg/wk"
+            value={`${avgDelta > 0 ? "+" : ""}${avgDelta.toFixed(1)}`}
+            tone={avgDelta > 0.5 ? "green" : avgDelta < -0.5 ? "red" : "neutral"}
+          />
+          <Stat
+            label="Roster proj after"
+            value={rosterProjAfter.toFixed(1)}
+            tone="neutral"
+          />
+        </div>
       )}
+
+      <button
+        onClick={runAnalysis}
+        disabled={!analyzable || analysisMut.isPending}
+        className="btn-primary w-full disabled:opacity-50"
+      >
+        {analysisMut.isPending ? "Analyzing…" : "Analyze Trade"}
+      </button>
+
+      {/* Detailed verdict */}
+      {showAnalysis && analysis && (
+        <div className="space-y-3">
+          <div
+            className={cn(
+              "p-4 rounded-xl border text-center",
+              analysis.recommendation === "accept"
+                ? "bg-green-500/10 border-green-500/20"
+                : analysis.recommendation === "decline"
+                ? "bg-red-500/10 border-red-500/20"
+                : "bg-yellow-500/10 border-yellow-500/20",
+            )}
+          >
+            <p
+              className={cn(
+                "text-lg font-bold",
+                analysis.recommendation === "accept"
+                  ? "text-green-400"
+                  : analysis.recommendation === "decline"
+                  ? "text-red-400"
+                  : "text-yellow-400",
+              )}
+            >
+              {analysis.recommendation === "accept"
+                ? "✓ Accept Trade"
+                : analysis.recommendation === "decline"
+                ? "✗ Decline Trade"
+                : "~ Neutral Trade"}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {analysis.valueDifference > 0 ? "+" : ""}
+              {analysis.valueDifference.toFixed(1)} pts/wk net gain (server)
+            </p>
+          </div>
+          <p className="text-sm text-muted-foreground leading-relaxed">{analysis.analysis}</p>
+          {analysis.factors?.map((f: string, i: number) => (
+            <p key={i} className="text-xs text-muted-foreground border-l-2 border-primary/30 pl-2">
+              {f}
+            </p>
+          ))}
+        </div>
+      )}
+      {showAnalysis && analysisMut.error ? (
+        <p className="text-xs text-red-400">
+          {String(analysisMut.error.message || "Analysis failed")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function Stat({ label, value, tone }: { label: string; value: string; tone: "green" | "red" | "neutral" }) {
+  return (
+    <div className="text-center">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p
+        className={cn(
+          "text-sm font-bold num",
+          tone === "green" ? "text-green-400" : tone === "red" ? "text-red-400" : "text-foreground",
+        )}
+      >
+        {value}
+      </p>
     </div>
   );
 }
@@ -1139,7 +1347,7 @@ export default function FantasyApp() {
 
           {/* Trade tab */}
           {activeTab === "trade" && (
-            <TradeAnalyzer sportKey={selectedSport} />
+            <TradeAnalyzer sportKey={selectedSport} roster={roster} />
           )}
         </div>
 
@@ -1206,7 +1414,7 @@ export default function FantasyApp() {
             </div>
           )}
 
-          {activeTab !== "trade" && <TradeAnalyzer sportKey={selectedSport} />}
+          {activeTab !== "trade" && <TradeAnalyzer sportKey={selectedSport} roster={roster} />}
 
           {/* Projections summary */}
           <div className="glass-card p-4 space-y-3">
