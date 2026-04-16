@@ -1,14 +1,15 @@
 import { defineConfig } from "drizzle-kit";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL, ensure the database is provisioned");
-}
+// drizzle-kit only needs DATABASE_URL when actually pushing migrations.
+// Don't throw at import time — that breaks `npm run check` and tooling
+// that reads this file without a DB configured.
+const dbUrl = process.env.DATABASE_URL || "";
 
 export default defineConfig({
   out: "./migrations",
-  schema: "./shared/schema.ts",
+  schema: "./shared/dbSchema.ts",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL,
+    url: dbUrl,
   },
 });
