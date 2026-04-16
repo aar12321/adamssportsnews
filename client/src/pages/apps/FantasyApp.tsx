@@ -970,72 +970,172 @@ export default function FantasyApp() {
             </div>
           )}
 
-          {/* Injuries */}
-          {activeTab === "injuries" && (
-            <div className="space-y-2">
-              {!injuredPlayers && (
-                <div className="space-y-2">
-                  {[...Array(3)].map((_, i) => (
-                    <div key={i} className="glass-card p-4 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Skeleton className="h-4 w-28" />
-                            <Skeleton className="h-5 w-14 rounded" />
-                          </div>
-                          <Skeleton className="h-3 w-20" />
-                        </div>
-                        <div className="space-y-1">
-                          <Skeleton className="h-4 w-10 ml-auto" />
-                          <Skeleton className="h-3 w-12" />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {(injuredPlayers || []).map((p: any) => (
-                <div key={p.id} className={cn(
-                  "glass-card p-4 border-l-4",
-                  p.status === "out" ? "border-l-red-400" :
-                  p.status === "injured" ? "border-l-red-400" :
-                  p.status === "doubtful" ? "border-l-orange-400" :
-                  "border-l-yellow-400"
-                )}>
+          {/* Injuries — scoped to the user's roster first, then a side
+               list of other notable injuries at positions they own so
+               they can find a replacement. */}
+          {activeTab === "injuries" && (() => {
+            // Players on the user's roster with any non-active status
+            const rosterInjuries = roster.filter((p: any) => p.status && p.status !== "active");
+            const rosterIds = new Set(roster.map((p: any) => p.id));
+            // Normalized set of positions the user rosters — used to show
+            // relevant replacement candidates at the bottom.
+            const myPositions = new Set<string>();
+            for (const p of roster) {
+              const norm = normalizePosition(p.position, selectedSport);
+              if (norm) myPositions.add(norm);
+            }
+            const replacementCandidates = (injuredPlayers || [])
+              .filter((p: any) => !rosterIds.has(p.id))
+              .filter((p: any) => {
+                const norm = normalizePosition(p.position, selectedSport);
+                return norm && myPositions.has(norm);
+              })
+              .slice(0, 8);
+
+            return (
+              <div className="space-y-3">
+                {/* Header showing roster health status */}
+                <div className="glass-card p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold text-foreground">{p.name}</p>
-                        <span className={cn(
-                          "px-2 py-0.5 rounded text-xs font-bold",
-                          STATUS_CONFIG[p.status as keyof typeof STATUS_CONFIG]?.className
-                        )}>
-                          {STATUS_CONFIG[p.status as keyof typeof STATUS_CONFIG]?.label}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">{p.position} · {p.team}</p>
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+                        Your roster ({roster.length} {roster.length === 1 ? "player" : "players"})
+                      </p>
+                      <p className="text-sm text-foreground mt-1">
+                        {roster.length === 0
+                          ? "Add players to track injuries"
+                          : rosterInjuries.length === 0
+                            ? "All clear — no injuries"
+                            : `${rosterInjuries.length} ${rosterInjuries.length === 1 ? "player" : "players"} with injury status`}
+                      </p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-muted-foreground num">{p.projectedPoints != null ? p.projectedPoints.toFixed(1) : "\u2014"}</p>
-                      <p className="text-xs text-muted-foreground">proj pts</p>
-                    </div>
+                    {rosterInjuries.length > 0 ? (
+                      <AlertCircle className="w-6 h-6 text-orange-400" />
+                    ) : roster.length > 0 ? (
+                      <Activity className="w-6 h-6 text-green-400" />
+                    ) : (
+                      <Users className="w-6 h-6 text-muted-foreground" />
+                    )}
                   </div>
-                  {p.injuryNote && (
-                    <p className="text-xs text-orange-400 mt-2 border-l-2 border-orange-400/30 pl-2">{p.injuryNote}</p>
-                  )}
-                  {p.recentNews?.[0] && (
-                    <p className="text-xs text-muted-foreground mt-1">{p.recentNews[0]}</p>
-                  )}
                 </div>
-              ))}
-              {(!injuredPlayers || injuredPlayers.length === 0) && (
-                <div className="glass-card p-6 text-center">
-                  <Activity className="w-8 h-8 text-green-400 mx-auto mb-2" />
-                  <p className="text-sm text-green-400 font-medium">No major injuries</p>
-                </div>
-              )}
-            </div>
-          )}
+
+                {/* Roster-specific injury cards */}
+                {rosterInjuries.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Needs attention
+                    </p>
+                    {rosterInjuries.map((p: any) => (
+                      <div key={p.id} className={cn(
+                        "glass-card p-4 border-l-4",
+                        p.status === "out" ? "border-l-red-400" :
+                        p.status === "injured" ? "border-l-red-400" :
+                        p.status === "doubtful" ? "border-l-orange-400" :
+                        "border-l-yellow-400"
+                      )}>
+                        <div className="flex items-center justify-between">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-foreground truncate">{p.name}</p>
+                              <span className={cn(
+                                "px-2 py-0.5 rounded text-xs font-bold flex-shrink-0",
+                                STATUS_CONFIG[p.status as keyof typeof STATUS_CONFIG]?.className,
+                              )}>
+                                {STATUS_CONFIG[p.status as keyof typeof STATUS_CONFIG]?.label || p.status}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{p.position} · {p.team}</p>
+                          </div>
+                          <div className="text-right flex-shrink-0 ml-3">
+                            <p className="text-sm font-bold text-muted-foreground num">
+                              {p.projectedPoints != null ? p.projectedPoints.toFixed(1) : "\u2014"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">proj pts</p>
+                          </div>
+                        </div>
+                        {p.injuryNote && (
+                          <p className="text-xs text-orange-400 mt-2 border-l-2 border-orange-400/30 pl-2">{p.injuryNote}</p>
+                        )}
+                        {p.recentNews?.[0] && (
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{p.recentNews[0]}</p>
+                        )}
+                        <div className="flex gap-2 mt-3">
+                          <button
+                            onClick={() => setSelectedPlayer(p)}
+                            className="text-xs px-2.5 py-1 rounded bg-muted hover:bg-muted/80"
+                          >
+                            Details
+                          </button>
+                          <button
+                            onClick={() => removePlayer(p.id)}
+                            className="text-xs px-2.5 py-1 rounded border border-border hover:border-red-500/40 hover:text-red-400"
+                          >
+                            Drop player
+                          </button>
+                          <button
+                            onClick={() => setActiveTab("waiver")}
+                            className="text-xs px-2.5 py-1 rounded border border-border hover:border-foreground/40"
+                          >
+                            Find replacement
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Suggested replacements at positions you roster */}
+                {roster.length > 0 && replacementCandidates.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Other injured players at your positions
+                    </p>
+                    {replacementCandidates.map((p: any) => (
+                      <div key={p.id} className="glass-card p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium truncate">{p.name}</p>
+                              <span className={cn(
+                                "px-1.5 py-0.5 rounded text-[10px] font-bold flex-shrink-0",
+                                STATUS_CONFIG[p.status as keyof typeof STATUS_CONFIG]?.className,
+                              )}>
+                                {STATUS_CONFIG[p.status as keyof typeof STATUS_CONFIG]?.label || p.status}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground">{p.position} · {p.team}</p>
+                          </div>
+                          <button
+                            onClick={() => setSelectedPlayer(p)}
+                            className="text-xs px-2 py-1 rounded bg-muted hover:bg-muted/80 flex-shrink-0"
+                          >
+                            View
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Empty state when user has no roster */}
+                {roster.length === 0 && (
+                  <div className="glass-card p-6 text-center">
+                    <Users className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm font-medium">No roster yet</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Injuries are scoped to your roster. Add players first.
+                    </p>
+                    <button
+                      onClick={() => setActiveTab("players")}
+                      className="btn-primary mt-3 text-xs px-3 py-1.5"
+                    >
+                      Browse players
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Trade tab */}
           {activeTab === "trade" && (
