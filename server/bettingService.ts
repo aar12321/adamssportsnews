@@ -1,35 +1,32 @@
 import type { BetAnalysis, MockBet, MockAccount, BetType } from "@shared/schema";
 import { oddsApiService } from "./oddsApiService";
-
-// In-memory storage for mock betting (per session)
-const mockAccounts = new Map<string, MockAccount>();
-const mockBets = new Map<string, MockBet[]>();
+import { accountRepo, betsRepo } from "./db/repos";
 
 const DEFAULT_BALANCE = 10000; // $10,000 starting mock balance
 
+function newAccount(): MockAccount {
+  return {
+    balance: DEFAULT_BALANCE,
+    startingBalance: DEFAULT_BALANCE,
+    totalBets: 0,
+    wonBets: 0,
+    lostBets: 0,
+    pushBets: 0,
+    totalWagered: 0,
+    totalProfit: 0,
+    winRate: 0,
+    roi: 0,
+  };
+}
+
 function getOrCreateAccount(userId: string): MockAccount {
-  if (!mockAccounts.has(userId)) {
-    mockAccounts.set(userId, {
-      balance: DEFAULT_BALANCE,
-      startingBalance: DEFAULT_BALANCE,
-      totalBets: 0,
-      wonBets: 0,
-      lostBets: 0,
-      pushBets: 0,
-      totalWagered: 0,
-      totalProfit: 0,
-      winRate: 0,
-      roi: 0,
-    });
-  }
-  return mockAccounts.get(userId)!;
+  const existing = accountRepo.get(userId);
+  if (existing) return existing;
+  return accountRepo.upsert(userId, newAccount());
 }
 
 function getUserBets(userId: string): MockBet[] {
-  if (!mockBets.has(userId)) {
-    mockBets.set(userId, []);
-  }
-  return mockBets.get(userId)!;
+  return betsRepo.listByUser(userId);
 }
 
 // Team performance data for probability calculations
@@ -257,17 +254,20 @@ export class BettingService {
   }
 
   getBets(userId: string): MockBet[] {
-    const userBets = getUserBets(userId);
-    // Lazy settlement: settle any pending bets whose games should have finished
+    // Lazy settlement: settle any pending bets whose games should have
+    // finished. Re-read after settlement so the caller gets fresh status.
     const now = Date.now();
-    for (const bet of userBets) {
+    const pending = getUserBets(userId);
+    let settledAny = false;
+    for (const bet of pending) {
       if (bet.status === "pending" && bet.gameEndTime) {
         if (new Date(bet.gameEndTime).getTime() <= now) {
           this.settleBet(userId, bet.id);
+          settledAny = true;
         }
       }
     }
-    return userBets;
+    return settledAny ? getUserBets(userId) : pending;
   }
 
   /** Estimate when a game finishes based on sport */
@@ -323,9 +323,9 @@ export class BettingService {
     account.balance = Math.round(account.balance * 100) / 100;
     account.totalBets += 1;
     account.totalWagered += bet.amount;
+    accountRepo.upsert(userId, account);
 
-    const userBets = getUserBets(userId);
-    userBets.push(newBet);
+    betsRepo.add(userId, newBet);
 
     return newBet;
   }
@@ -344,32 +344,36 @@ export class BettingService {
     // 5% push chance for spread bets
     const push = bet.betType === "spread" && Math.abs(roll - bet.winProbability) < 0.05;
 
+    const patch: Partial<MockBet> = {};
     if (push) {
-      bet.status = "push";
+      patch.status = "push";
       account.balance += bet.amount; // Refund
       account.pushBets += 1;
-      bet.result = "Push - bet refunded";
+      patch.result = "Push - bet refunded";
     } else if (won) {
-      bet.status = "won";
+      patch.status = "won";
       account.balance += bet.potentialPayout;
       account.wonBets += 1;
       account.totalProfit += (bet.potentialPayout - bet.amount);
-      bet.result = `Won! +$${(bet.potentialPayout - bet.amount).toFixed(2)}`;
+      patch.result = `Won! +$${(bet.potentialPayout - bet.amount).toFixed(2)}`;
     } else {
-      bet.status = "lost";
+      patch.status = "lost";
       account.lostBets += 1;
       account.totalProfit -= bet.amount;
-      bet.result = `Lost -$${bet.amount.toFixed(2)}`;
+      patch.result = `Lost -$${bet.amount.toFixed(2)}`;
     }
 
-    bet.settledAt = new Date().toISOString();
+    patch.settledAt = new Date().toISOString();
+    betsRepo.update(userId, betId, patch);
 
-    // Update stats
-    const settledBets = userBets.filter(b => b.status !== "pending" && b.status !== "cancelled");
+    // Update stats — re-read after update so winRate reflects the latest row
+    const refreshed = betsRepo.listByUser(userId);
+    const settledBets = refreshed.filter(b => b.status !== "pending" && b.status !== "cancelled");
     const wonCount = settledBets.filter(b => b.status === "won").length;
     account.winRate = settledBets.length > 0 ? wonCount / settledBets.length : 0;
     account.roi = account.totalWagered > 0 ? (account.totalProfit / account.totalWagered) * 100 : 0;
     account.balance = Math.round(account.balance * 100) / 100;
+    accountRepo.upsert(userId, account);
   }
 
   cancelBet(userId: string, betId: string): MockBet | { error: string } {
@@ -380,31 +384,39 @@ export class BettingService {
     if (!bet) return { error: "Bet not found" };
     if (bet.status !== "pending") return { error: "Can only cancel pending bets" };
 
-    bet.status = "cancelled";
+    const updated = betsRepo.update(userId, betId, { status: "cancelled" });
     account.balance += bet.amount;
     account.totalBets -= 1;
     account.totalWagered -= bet.amount;
     account.balance = Math.round(account.balance * 100) / 100;
+    accountRepo.upsert(userId, account);
 
-    return bet;
+    return updated ?? bet;
   }
 
   resetAccount(userId: string): MockAccount {
-    const account: MockAccount = {
-      balance: DEFAULT_BALANCE,
-      startingBalance: DEFAULT_BALANCE,
-      totalBets: 0,
-      wonBets: 0,
-      lostBets: 0,
-      pushBets: 0,
-      totalWagered: 0,
-      totalProfit: 0,
-      winRate: 0,
-      roi: 0,
-    };
-    mockAccounts.set(userId, account);
-    mockBets.set(userId, []);
+    const account = newAccount();
+    accountRepo.upsert(userId, account);
+    betsRepo.removeAllForUser(userId);
     return account;
+  }
+
+  /**
+   * Sweep every user's pending bets and settle any whose game has ended.
+   * Called from a periodic background task so bets don't sit `pending`
+   * forever when the user never re-opens the app.
+   */
+  settleDueBetsForAllUsers(): number {
+    const now = Date.now();
+    const pending = betsRepo.listAllPending();
+    let settled = 0;
+    for (const { userId, bet } of pending) {
+      if (bet.gameEndTime && new Date(bet.gameEndTime).getTime() <= now) {
+        this.settleBet(userId, bet.id);
+        settled += 1;
+      }
+    }
+    return settled;
   }
 
   getTrendingBets(): { game: string; betType: string; popularity: number; value: number }[] {

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { APP_SPORTS, getUserAppSports } from "@shared/appSports";
 import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Trophy, ChevronLeft, Search, AlertCircle, TrendingUp, TrendingDown,
   Users, Activity, Star, ArrowLeftRight, Target, RefreshCw, Minus,
@@ -12,6 +12,7 @@ import { Link } from "wouter";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
+import { apiRequest, fetchJson } from "@/lib/queryClient";
 import {
   SLOT_ELIGIBILITY,
   canFitFantasyRoster as canFitRoster,
@@ -25,99 +26,92 @@ import {
 
 type AddResult = { ok: true } | { ok: false; reason: string };
 
-// Stores rosters as a nested map: { [sport]: player[] } keyed by user.
-// `userId` must be a real authenticated id; pass "" to disable persistence.
-function useLocalRoster(userId: string, sport: string) {
-  const storageKey = userId ? `fantasy_rosters_v2_${userId}` : "";
-
-  const readAll = useCallback((): Record<string, any[]> => {
-    if (!storageKey) return {};
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) return {};
-      const parsed = JSON.parse(raw);
-      return typeof parsed === "object" && parsed !== null ? parsed : {};
-    } catch {
-      return {};
-    }
-  }, [storageKey]);
-
-  const [allRosters, setAllRosters] = useState<Record<string, any[]>>(() => readAll());
+// Server-backed roster hook. Rosters live in the database (via repo layer)
+// and are fetched per-sport; localStorage is no longer the source of truth.
+// The hook still returns a synchronous `roster` array — it's the last
+// server snapshot, optimistically updated on add/remove and reconciled
+// after the mutation returns.
+function useServerRoster(userId: string, sport: string) {
+  const queryClient = useQueryClient();
+  const enabled = !!userId && isSportKey(sport);
+  const queryKey = ["/api/fantasy/roster", sport, userId];
   const [lastError, setLastError] = useState<string | null>(null);
 
-  // Re-read when user changes
-  useEffect(() => {
-    setAllRosters(readAll());
-  }, [readAll]);
-
-  // Persist whenever allRosters changes
-  useEffect(() => {
-    if (!storageKey) return;
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(allRosters));
-    } catch (err) {
-      // Quota or disabled storage — surface so the UI can react
-      setLastError("Could not save roster to browser storage");
-    }
-  }, [allRosters, storageKey]);
-
-  // Re-validate the loaded roster when sport changes. If a previously-stored
-  // roster can't fit the current lineup (e.g. schema changed, or someone
-  // tampered with localStorage) we surface a warning instead of silently
-  // letting the user operate on an invalid roster.
-  useEffect(() => {
-    if (!isSportKey(sport)) return;
-    const current = allRosters[sport] || [];
-    if (current.length === 0) return;
-    // Any player whose sport is wrong, or any unknown position
-    const wrongSport = current.find((p: any) => p.sport && p.sport !== sport);
-    if (wrongSport) {
-      setLastError(`Stored roster contains a ${wrongSport.sport} player — use "Reset roster" to fix`);
-      return;
-    }
-    if (!canFitRoster(current, sport)) {
-      setLastError("Stored roster doesn't fit the current lineup — use \"Reset roster\" to fix");
-    }
-  }, [sport, allRosters]);
-
-  const roster = allRosters[sport] || [];
+  const { data } = useQuery({
+    queryKey,
+    enabled,
+    queryFn: () => fetchJson<{ sport: string; players: any[] }>(
+      `/api/fantasy/roster?sport=${encodeURIComponent(sport)}`,
+    ),
+    staleTime: 30_000,
+  });
+  const roster = data?.players ?? [];
 
   const checkCanAdd = useCallback((player: any): AddResult => {
     if (!userId) return { ok: false, reason: "Sign in to build a roster" };
     if (!isSportKey(sport)) return { ok: false, reason: `Unknown sport: ${sport}` };
-    const current = allRosters[sport] || [];
-    return validateRosterAddition(current, player, sport);
-  }, [allRosters, sport, userId]);
+    return validateRosterAddition(roster, player, sport);
+  }, [roster, sport, userId]);
+
+  const addMut = useMutation({
+    mutationFn: (player: any) =>
+      apiRequest<{ ok: boolean; players: any[] }>("POST", "/api/fantasy/roster/add", { sport, player }),
+    onSuccess: (res) => {
+      queryClient.setQueryData(queryKey, { sport, players: res.players });
+      setLastError(null);
+    },
+    onError: (err: any) => {
+      // Server returned 400 with a reason — surface it
+      const msg = String(err?.message || "");
+      const afterColon = msg.slice(msg.indexOf(":") + 1).trim();
+      try {
+        const parsed = JSON.parse(afterColon);
+        if (parsed?.reason) setLastError(parsed.reason);
+        else if (parsed?.error) setLastError(parsed.error);
+        else setLastError(afterColon || "Failed to add player");
+      } catch {
+        setLastError(afterColon || "Failed to add player");
+      }
+    },
+  });
+
+  const removeMut = useMutation({
+    mutationFn: (playerId: string) =>
+      apiRequest<{ ok: boolean; players: any[] }>("POST", "/api/fantasy/roster/remove", { sport, playerId }),
+    onSuccess: (res) => {
+      queryClient.setQueryData(queryKey, { sport, players: res.players });
+    },
+  });
+
+  const resetMut = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/fantasy/roster/reset", { sport }),
+    onSuccess: () => {
+      queryClient.setQueryData(queryKey, { sport, players: [] });
+      setLastError(null);
+    },
+  });
 
   const addPlayer = useCallback((player: any): AddResult => {
-    const result = checkCanAdd(player);
-    if (!result.ok) {
-      setLastError(result.reason);
-      return result;
+    const check = checkCanAdd(player);
+    if (!check.ok) {
+      setLastError(check.reason);
+      return check;
     }
-    setLastError(null);
-    setAllRosters(prev => {
-      const current = prev[sport] || [];
-      return { ...prev, [sport]: [...current, player] };
-    });
+    addMut.mutate(player);
     return { ok: true };
-  }, [sport, checkCanAdd]);
+  }, [checkCanAdd, addMut]);
 
   const removePlayer = useCallback((playerId: string) => {
     setLastError(null);
-    setAllRosters(prev => {
-      const current = prev[sport] || [];
-      return { ...prev, [sport]: current.filter(p => p.id !== playerId) };
-    });
-  }, [sport]);
+    removeMut.mutate(playerId);
+  }, [removeMut]);
 
   const resetSportRoster = useCallback(() => {
-    setLastError(null);
-    setAllRosters(prev => ({ ...prev, [sport]: [] }));
-  }, [sport]);
+    resetMut.mutate();
+  }, [resetMut]);
 
   const isOnRoster = useCallback((playerId: string) => {
-    return roster.some(p => p.id === playerId);
+    return roster.some((p: any) => p.id === playerId);
   }, [roster]);
 
   const clearError = useCallback(() => setLastError(null), []);
@@ -133,6 +127,9 @@ function useLocalRoster(userId: string, sport: string) {
     clearError,
   };
 }
+
+// Backward-compatible alias — call sites still use `useLocalRoster`.
+const useLocalRoster = useServerRoster;
 
 // Sport-specific roster positions and configurations
 const SPORT_CONFIG: Record<string, {

@@ -1,4 +1,5 @@
 import type { UserPreferences } from "@shared/schema";
+import { preferencesRepo } from "./db/repos";
 
 const defaultPreferences: UserPreferences = {
   userId: "default",
@@ -40,27 +41,26 @@ const defaultPreferences: UserPreferences = {
   },
 };
 
-const userPreferencesStore = new Map<string, UserPreferences>();
-
 export class UserPreferencesService {
   getPreferences(userId: string = "default"): UserPreferences {
-    if (!userPreferencesStore.has(userId)) {
-      userPreferencesStore.set(userId, { ...defaultPreferences, userId });
-    }
-    return userPreferencesStore.get(userId)!;
+    const existing = preferencesRepo.get(userId);
+    if (existing) return existing;
+    const fresh: UserPreferences = { ...defaultPreferences, userId };
+    preferencesRepo.upsert(userId, fresh);
+    return fresh;
   }
 
   updatePreferences(userId: string = "default", updates: Partial<UserPreferences>): UserPreferences {
     const current = this.getPreferences(userId);
     const updated = this.deepMerge(current, updates) as UserPreferences;
     updated.userId = userId;
-    userPreferencesStore.set(userId, updated);
+    preferencesRepo.upsert(userId, updated);
     return updated;
   }
 
   resetPreferences(userId: string = "default"): UserPreferences {
-    const fresh = { ...defaultPreferences, userId };
-    userPreferencesStore.set(userId, fresh);
+    const fresh: UserPreferences = { ...defaultPreferences, userId };
+    preferencesRepo.upsert(userId, fresh);
     return fresh;
   }
 

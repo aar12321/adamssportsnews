@@ -4,6 +4,7 @@ import {
   canFitFantasyRoster,
   type RosterValidationResult,
 } from "@shared/fantasyRules";
+import { rosterRepo } from "./db/repos";
 
 // Mock player database with realistic data
 const playerDatabase: FantasyPlayer[] = [
@@ -289,6 +290,40 @@ export class FantasyService {
     sport: string,
   ): boolean {
     return canFitFantasyRoster(roster, sport);
+  }
+
+  // --- Per-user persistent rosters ----------------------------------------
+
+  getRoster(userId: string, sport: string): FantasyPlayer[] {
+    return rosterRepo.getBySport(userId, sport);
+  }
+
+  getAllRosters(userId: string): Record<string, FantasyPlayer[]> {
+    return rosterRepo.getAll(userId);
+  }
+
+  addToRoster(
+    userId: string,
+    sport: string,
+    player: FantasyPlayer & { id: string },
+  ): { ok: true; players: FantasyPlayer[] } | { ok: false; reason: string } {
+    const current = rosterRepo.getBySport(userId, sport);
+    const result = validateRosterAddition(current, player, sport);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    const next = [...current, player];
+    rosterRepo.setBySport(userId, sport, next);
+    return { ok: true, players: next };
+  }
+
+  removeFromRoster(userId: string, sport: string, playerId: string): FantasyPlayer[] {
+    const current = rosterRepo.getBySport(userId, sport);
+    const next = current.filter((p) => p.id !== playerId);
+    rosterRepo.setBySport(userId, sport, next);
+    return next;
+  }
+
+  resetRoster(userId: string, sport: string): void {
+    rosterRepo.clearSport(userId, sport);
   }
 }
 

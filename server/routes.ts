@@ -412,6 +412,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // --- Persistent per-user rosters ---------------------------------------
+
+  app.get("/api/fantasy/roster", requireUser, (req, res) => {
+    try {
+      const userId = req.userId!;
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      if (sport) {
+        return res.json({ sport, players: fantasyService.getRoster(userId, sport) });
+      }
+      res.json(fantasyService.getAllRosters(userId));
+    } catch (err) {
+      console.error("Error fetching roster:", err);
+      res.status(500).json({ error: "Failed to fetch roster" });
+    }
+  });
+
+  app.post("/api/fantasy/roster/add", requireUser, (req, res) => {
+    try {
+      const userId = req.userId!;
+      const body = req.body ?? {};
+      const { sport, error } = requireSport(body.sport);
+      if (error || !sport) return res.status(400).json({ error });
+      const player = body.player;
+      if (!player || typeof player !== "object" || typeof player.id !== "string") {
+        return res.status(400).json({ error: "player object with id required" });
+      }
+      const result = fantasyService.addToRoster(userId, sport, player);
+      if (!result.ok) return res.status(400).json(result);
+      res.json({ ok: true, players: result.players });
+    } catch (err) {
+      console.error("Error adding to roster:", err);
+      res.status(500).json({ error: "Failed to add player" });
+    }
+  });
+
+  app.post("/api/fantasy/roster/remove", requireUser, (req, res) => {
+    try {
+      const userId = req.userId!;
+      const body = req.body ?? {};
+      const { sport, error } = requireSport(body.sport);
+      if (error || !sport) return res.status(400).json({ error });
+      const playerId = cleanText(body.playerId, 64);
+      if (!playerId) return res.status(400).json({ error: "playerId required" });
+      const players = fantasyService.removeFromRoster(userId, sport, playerId);
+      res.json({ ok: true, players });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to remove player" });
+    }
+  });
+
+  app.post("/api/fantasy/roster/reset", requireUser, (req, res) => {
+    try {
+      const userId = req.userId!;
+      const body = req.body ?? {};
+      const { sport, error } = requireSport(body.sport);
+      if (error || !sport) return res.status(400).json({ error });
+      fantasyService.resetRoster(userId, sport);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to reset roster" });
+    }
+  });
+
   // Server-side echo of the client's roster-add validation, so tampering with
   // localStorage can't produce a roster that would normally be rejected.
   app.post("/api/fantasy/roster/validate", (req, res) => {
