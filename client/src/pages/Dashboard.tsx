@@ -55,7 +55,15 @@ export default function Dashboard() {
             ))}
           </div>
           {activeTab === "scores" && <LiveScoresWidget sports={dashboardLayout.scoresSports} />}
-          {activeTab === "news" && <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} />}
+          {activeTab === "news" && (
+            <NewsFeed
+              categories={dashboardLayout.newsCategories}
+              count={dashboardLayout.newsCount}
+              favoriteSports={preferences.favoriteSports}
+              favoriteTeams={preferences.favoriteTeams}
+              favoritePlayers={preferences.favoritePlayers}
+            />
+          )}
           {activeTab === "apps" && <AppSummaries />}
         </div>
       ) : (
@@ -80,7 +88,13 @@ export default function Dashboard() {
               <div className={cn(
                 dashboardLayout.showLiveScores ? "col-span-7 xl:col-span-8" : "col-span-12"
               )}>
-                <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} />
+                <NewsFeed
+                  categories={dashboardLayout.newsCategories}
+                  count={dashboardLayout.newsCount}
+                  favoriteSports={preferences.favoriteSports}
+                  favoriteTeams={preferences.favoriteTeams}
+                  favoritePlayers={preferences.favoritePlayers}
+                />
               </div>
             )}
           </div>

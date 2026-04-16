@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Search, Filter, Zap, AlertTriangle, ArrowLeftRight, MessageCircle, Newspaper, AlertCircle } from "lucide-react";
+import { RefreshCw, Search, Filter, Zap, AlertTriangle, ArrowLeftRight, MessageCircle, Newspaper, AlertCircle, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/lib/queryClient";
 import NewsCard, { type NewsCategory } from "./NewsCard";
+import type { SportId } from "@shared/schema";
 
 const CATEGORIES: { key: NewsCategory; label: string; Icon: any }[] = [
   { key: "breaking", label: "Breaking", Icon: Zap },
@@ -38,12 +39,45 @@ function deduplicateNews(articles: any[]): any[] {
 interface NewsFeedProps {
   categories: string[];
   count: number;
+  favoriteSports?: SportId[];
+  favoriteTeams?: string[];
+  favoritePlayers?: string[];
 }
 
-export default function NewsFeed({ categories, count }: NewsFeedProps) {
+/**
+ * Score an article by how well it matches the user's favorites. Positive
+ * score = article mentions one of their tracked teams/players. Used to:
+ *   (a) filter when "For you" is active,
+ *   (b) sort all articles so personally-relevant news floats to the top.
+ */
+function personalScore(
+  article: { title: string; description?: string; tags?: string[] },
+  teams: string[],
+  players: string[],
+): number {
+  const hay = `${article.title} ${article.description || ""} ${(article.tags || []).join(" ")}`.toLowerCase();
+  let score = 0;
+  for (const t of teams) {
+    if (t && hay.includes(t.toLowerCase())) score += 2;
+  }
+  for (const p of players) {
+    if (p && hay.includes(p.toLowerCase())) score += 3;
+  }
+  return score;
+}
+
+export default function NewsFeed({
+  categories,
+  count,
+  favoriteSports = [],
+  favoriteTeams = [],
+  favoritePlayers = [],
+}: NewsFeedProps) {
   const [activeCategory, setActiveCategory] = useState<NewsCategory | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
+  const [forYou, setForYou] = useState(false);
+  const hasFavorites = favoriteTeams.length > 0 || favoritePlayers.length > 0;
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["/api/news"],
@@ -58,11 +92,20 @@ export default function NewsFeed({ categories, count }: NewsFeedProps) {
     return deduped.map((a: any) => ({
       ...a,
       detectedCategory: detectCategory(a),
+      _personalScore: personalScore(a, favoriteTeams, favoritePlayers),
     }));
-  }, [data?.articles]);
+  }, [data?.articles, favoriteTeams, favoritePlayers]);
 
   const filteredArticles = useMemo(() => {
     let articles = processedArticles;
+
+    // Filter by favorite sports so users don't see news for sports they
+    // don't care about. If the user has no favorite sports, show everything.
+    if (favoriteSports.length > 0) {
+      articles = articles.filter((a: any) =>
+        !a.sportId || favoriteSports.includes(a.sportId),
+      );
+    }
 
     // Filter by enabled categories from preferences
     if (categories.length > 0) {
@@ -72,6 +115,12 @@ export default function NewsFeed({ categories, count }: NewsFeedProps) {
     // Filter by active category tab
     if (activeCategory !== "all") {
       articles = articles.filter(a => a.detectedCategory === activeCategory);
+    }
+
+    // "For you" mode — restrict to articles that mention a tracked team
+    // or player. Off by default when the user has no favorites set.
+    if (forYou && hasFavorites) {
+      articles = articles.filter((a: any) => (a._personalScore ?? 0) > 0);
     }
 
     // Filter by search
@@ -84,8 +133,18 @@ export default function NewsFeed({ categories, count }: NewsFeedProps) {
       );
     }
 
+    // Stable sort by (personal score desc, publishedAt desc) so relevant
+    // news bubbles up without hiding the general feed.
+    articles = articles.slice().sort((a: any, b: any) => {
+      const s = (b._personalScore ?? 0) - (a._personalScore ?? 0);
+      if (s !== 0) return s;
+      const ta = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+      const tb = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+      return tb - ta;
+    });
+
     return articles.slice(0, count);
-  }, [processedArticles, activeCategory, searchQuery, categories, count]);
+  }, [processedArticles, activeCategory, searchQuery, categories, count, favoriteSports, forYou, hasFavorites]);
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -135,6 +194,21 @@ export default function NewsFeed({ categories, count }: NewsFeedProps) {
 
       {/* Category filters */}
       <div className="scroll-row">
+        {hasFavorites && (
+          <button
+            onClick={() => setForYou((v) => !v)}
+            className={cn(
+              "flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all",
+              forYou
+                ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
+                : "bg-muted border-transparent text-muted-foreground hover:text-foreground",
+            )}
+            title="Only show articles mentioning your tracked teams or players"
+          >
+            <Star className="w-3 h-3" />
+            For you
+          </button>
+        )}
         <button
           onClick={() => setActiveCategory("all")}
           className={cn(
