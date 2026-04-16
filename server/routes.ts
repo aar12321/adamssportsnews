@@ -8,6 +8,7 @@ import { bettingService } from "./bettingService";
 import { fantasyService } from "./fantasyService";
 import { analystService } from "./analystService";
 import { userPreferencesService } from "./userPreferencesService";
+import { leaguesService } from "./leaguesService";
 import { espnSportsData } from "./espnSportsData";
 import { attachUser, requireUser, requireSelf } from "./auth";
 import { sseHandler, broadcast } from "./sse";
@@ -579,6 +580,144 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(team);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch sample team" });
+    }
+  });
+
+  // ==================== FANTASY LEAGUES ====================
+
+  app.get("/api/leagues", requireUser, (req, res) => {
+    try {
+      const leagues = leaguesService.listUserLeagues(req.userId!);
+      res.json(leagues);
+    } catch (err) {
+      console.error("Error listing leagues:", err);
+      res.status(500).json({ error: "Failed to list leagues" });
+    }
+  });
+
+  app.post("/api/leagues", requireUser, (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const name = cleanText(body.name, 64);
+      if (!name) return res.status(400).json({ error: "league name required" });
+      const { sport, error } = requireSport(body.sport);
+      if (error || !sport) return res.status(400).json({ error });
+      const teamName = cleanText(body.teamName, 48);
+      const maxRaw = Number(body.maxMembers);
+      const maxMembers = Number.isFinite(maxRaw) ? maxRaw : undefined;
+      const league = leaguesService.createLeague({
+        ownerId: req.userId!,
+        name,
+        sport,
+        teamName,
+        maxMembers,
+      });
+      res.json(league);
+    } catch (err) {
+      console.error("Error creating league:", err);
+      res.status(500).json({ error: "Failed to create league" });
+    }
+  });
+
+  app.post("/api/leagues/join", requireUser, (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const inviteCode = cleanText(body.inviteCode, 12);
+      if (!inviteCode) return res.status(400).json({ error: "inviteCode required" });
+      const teamName = cleanText(body.teamName, 48);
+      const result = leaguesService.joinByCode({
+        userId: req.userId!,
+        inviteCode,
+        teamName,
+      });
+      if (!result.ok) return res.status(400).json(result);
+      res.json(result.league);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to join league" });
+    }
+  });
+
+  app.get("/api/leagues/:id", requireUser, (req, res) => {
+    try {
+      const id = cleanText(req.params.id, 64);
+      if (!id) return res.status(400).json({ error: "league id required" });
+      const league = leaguesService.getLeague(id);
+      if (!league) return res.status(404).json({ error: "League not found" });
+      // Ensure caller is a member before exposing details
+      if (!league.members.some((m) => m.userId === req.userId)) {
+        return res.status(403).json({ error: "Not a member of this league" });
+      }
+      res.json(league);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch league" });
+    }
+  });
+
+  app.get("/api/leagues/:id/standings", requireUser, (req, res) => {
+    try {
+      const id = cleanText(req.params.id, 64);
+      if (!id) return res.status(400).json({ error: "league id required" });
+      const league = leaguesService.getLeague(id);
+      if (!league) return res.status(404).json({ error: "League not found" });
+      if (!league.members.some((m) => m.userId === req.userId)) {
+        return res.status(403).json({ error: "Not a member of this league" });
+      }
+      res.json(leaguesService.getStandings(id));
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch standings" });
+    }
+  });
+
+  app.get("/api/leagues/:id/matchups", requireUser, (req, res) => {
+    try {
+      const id = cleanText(req.params.id, 64);
+      if (!id) return res.status(400).json({ error: "league id required" });
+      const weekRaw = req.query.week;
+      const week = weekRaw !== undefined ? clampInt(weekRaw, 1, 1, 52) : undefined;
+      const league = leaguesService.getLeague(id);
+      if (!league) return res.status(404).json({ error: "League not found" });
+      if (!league.members.some((m) => m.userId === req.userId)) {
+        return res.status(403).json({ error: "Not a member of this league" });
+      }
+      const matchups = leaguesService.getWeekMatchups(id, week);
+      res.json({ week: week ?? league.currentWeek, matchups });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch matchups" });
+    }
+  });
+
+  app.post("/api/leagues/:id/schedule", requireUser, (req, res) => {
+    try {
+      const id = cleanText(req.params.id, 64);
+      if (!id) return res.status(400).json({ error: "league id required" });
+      const league = leaguesService.getLeague(id);
+      if (!league) return res.status(404).json({ error: "League not found" });
+      if (league.ownerId !== req.userId) {
+        return res.status(403).json({ error: "Only the league owner can generate a schedule" });
+      }
+      const weeksRaw = req.body?.weeks;
+      const weeks = Number.isFinite(Number(weeksRaw)) ? Math.max(2, Math.min(26, Number(weeksRaw))) : 14;
+      const created = leaguesService.generateSchedule(id, weeks);
+      res.json({ created });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to generate schedule" });
+    }
+  });
+
+  app.post("/api/leagues/:id/settle", requireUser, (req, res) => {
+    try {
+      const id = cleanText(req.params.id, 64);
+      if (!id) return res.status(400).json({ error: "league id required" });
+      const league = leaguesService.getLeague(id);
+      if (!league) return res.status(404).json({ error: "League not found" });
+      if (league.ownerId !== req.userId) {
+        return res.status(403).json({ error: "Only the league owner can settle a week" });
+      }
+      const week = clampInt(req.body?.week, league.currentWeek, 1, 52);
+      const result = leaguesService.settleWeek(id, week);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to settle week" });
     }
   });
 

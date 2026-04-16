@@ -13,6 +13,7 @@ import Apps from "@/pages/Apps";
 import BettingApp from "@/pages/apps/BettingApp";
 import FantasyApp from "@/pages/apps/FantasyApp";
 import AnalystApp from "@/pages/apps/AnalystApp";
+import LeaguesApp from "@/pages/apps/LeaguesApp";
 import Profile from "@/pages/Profile";
 import Login from "@/pages/Login";
 import Onboarding from "@/pages/Onboarding";
@@ -27,6 +28,7 @@ function Router() {
         <Route path="/apps/betting" component={BettingApp} />
         <Route path="/apps/fantasy" component={FantasyApp} />
         <Route path="/apps/analyst" component={AnalystApp} />
+        <Route path="/apps/leagues" component={LeaguesApp} />
         <Route path="/profile" component={Profile} />
         <Route component={Dashboard} />
       </Switch>

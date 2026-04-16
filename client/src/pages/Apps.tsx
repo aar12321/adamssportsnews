@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "wouter";
-import { DollarSign, Trophy, BarChart3, ArrowRight, Zap, TrendingUp, Users } from "lucide-react";
+import { DollarSign, Trophy, BarChart3, ArrowRight, Zap, TrendingUp, Users, Swords } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const apps = [
@@ -45,6 +45,20 @@ const apps = [
     badgeColor: "bg-blue-500/15 text-blue-400",
     features: ["Team analysis", "Player stats", "H2H compare", "League leaders"],
     stat: { label: "Leagues", value: "NBA · NFL · EPL" },
+  },
+  {
+    href: "/apps/leagues",
+    name: "Leagues",
+    description: "Create or join head-to-head fantasy leagues. Round-robin schedule, weekly matchups, live standings.",
+    icon: Swords,
+    color: "text-yellow-400",
+    bg: "bg-yellow-500/10",
+    border: "border-yellow-500/20",
+    gradient: "from-yellow-500/20 to-yellow-500/5",
+    badge: "New",
+    badgeColor: "bg-blue-500/15 text-blue-400",
+    features: ["Invite friends", "H2H matchups", "Live standings", "Weekly settle"],
+    stat: { label: "Formats", value: "H2H · 4–12 teams" },
   },
 ];
 
