@@ -248,31 +248,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/betting/account/:userId", requireUser, requireSelf(), (req, res) => {
+  app.get("/api/betting/account/:userId", requireUser, requireSelf(), async (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
       }
-      const account = bettingService.getAccount(req.params.userId);
+      const account = await bettingService.getAccount(req.params.userId);
       res.json(account);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch account" });
     }
   });
 
-  app.get("/api/betting/bets/:userId", requireUser, requireSelf(), (req, res) => {
+  app.get("/api/betting/bets/:userId", requireUser, requireSelf(), async (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
       }
-      const bets = bettingService.getBets(req.params.userId);
+      const bets = await bettingService.getBets(req.params.userId);
       res.json(bets);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch bets" });
     }
   });
 
-  app.post("/api/betting/bets/:userId", requireUser, requireSelf(), (req, res) => {
+  app.post("/api/betting/bets/:userId", requireUser, requireSelf(), async (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
@@ -291,7 +291,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (typeof body.betType !== "string" || !body.betType) {
         return res.status(400).json({ error: "betType is required" });
       }
-      const result = bettingService.placeBet(req.params.userId, { ...body, amount, odds });
+      const result = await bettingService.placeBet(req.params.userId, { ...body, amount, odds });
       if ("error" in result) {
         return res.status(400).json(result);
       }
@@ -302,12 +302,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/betting/bets/:userId/:betId", requireUser, requireSelf(), (req, res) => {
+  app.delete("/api/betting/bets/:userId/:betId", requireUser, requireSelf(), async (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
       }
-      const result = bettingService.cancelBet(req.params.userId, req.params.betId);
+      const result = await bettingService.cancelBet(req.params.userId, req.params.betId);
       if ("error" in result) {
         return res.status(400).json(result);
       }
@@ -317,12 +317,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/betting/account/:userId/reset", requireUser, requireSelf(), (req, res) => {
+  app.post("/api/betting/account/:userId/reset", requireUser, requireSelf(), async (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
       }
-      const account = bettingService.resetAccount(req.params.userId);
+      const account = await bettingService.resetAccount(req.params.userId);
       res.json(account);
     } catch (error) {
       res.status(500).json({ error: "Failed to reset account" });
@@ -424,22 +424,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // --- Persistent per-user rosters ---------------------------------------
 
-  app.get("/api/fantasy/roster", requireUser, (req, res) => {
+  app.get("/api/fantasy/roster", requireUser, async (req, res) => {
     try {
       const userId = req.userId!;
       const { sport, error } = parseSportQuery(req.query.sport);
       if (error) return res.status(400).json({ error });
       if (sport) {
-        return res.json({ sport, players: fantasyService.getRoster(userId, sport) });
+        return res.json({ sport, players: await fantasyService.getRoster(userId, sport) });
       }
-      res.json(fantasyService.getAllRosters(userId));
+      res.json(await fantasyService.getAllRosters(userId));
     } catch (err) {
       console.error("Error fetching roster:", err);
       res.status(500).json({ error: "Failed to fetch roster" });
     }
   });
 
-  app.post("/api/fantasy/roster/add", requireUser, (req, res) => {
+  app.post("/api/fantasy/roster/add", requireUser, async (req, res) => {
     try {
       const userId = req.userId!;
       const body = req.body ?? {};
@@ -449,7 +449,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!player || typeof player !== "object" || typeof player.id !== "string") {
         return res.status(400).json({ error: "player object with id required" });
       }
-      const result = fantasyService.addToRoster(userId, sport, player);
+      const result = await fantasyService.addToRoster(userId, sport, player);
       if (!result.ok) return res.status(400).json(result);
       res.json({ ok: true, players: result.players });
     } catch (err) {
@@ -458,7 +458,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/fantasy/roster/remove", requireUser, (req, res) => {
+  app.post("/api/fantasy/roster/remove", requireUser, async (req, res) => {
     try {
       const userId = req.userId!;
       const body = req.body ?? {};
@@ -466,20 +466,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error || !sport) return res.status(400).json({ error });
       const playerId = cleanText(body.playerId, 64);
       if (!playerId) return res.status(400).json({ error: "playerId required" });
-      const players = fantasyService.removeFromRoster(userId, sport, playerId);
+      const players = await fantasyService.removeFromRoster(userId, sport, playerId);
       res.json({ ok: true, players });
     } catch (err) {
       res.status(500).json({ error: "Failed to remove player" });
     }
   });
 
-  app.post("/api/fantasy/roster/reset", requireUser, (req, res) => {
+  app.post("/api/fantasy/roster/reset", requireUser, async (req, res) => {
     try {
       const userId = req.userId!;
       const body = req.body ?? {};
       const { sport, error } = requireSport(body.sport);
       if (error || !sport) return res.status(400).json({ error });
-      fantasyService.resetRoster(userId, sport);
+      await fantasyService.resetRoster(userId, sport);
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: "Failed to reset roster" });
@@ -488,23 +488,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // --- Opponent mock lineups (matchup simulation) -----------------------
 
-  app.get("/api/fantasy/opponents", requireUser, (req, res) => {
+  app.get("/api/fantasy/opponents", requireUser, async (req, res) => {
     try {
       const { sport, error } = requireSport(req.query.sport);
       if (error || !sport) return res.status(400).json({ error });
-      res.json(fantasyService.listOpponents(req.userId!, sport));
+      res.json(await fantasyService.listOpponents(req.userId!, sport));
     } catch (err) {
       res.status(500).json({ error: "Failed to list opponents" });
     }
   });
 
-  app.post("/api/fantasy/opponents", requireUser, (req, res) => {
+  app.post("/api/fantasy/opponents", requireUser, async (req, res) => {
     try {
       const body = req.body ?? {};
       const { sport, error } = requireSport(body.sport);
       if (error || !sport) return res.status(400).json({ error });
       const name = cleanText(body.name, 48) || "Opponent";
-      const result = fantasyService.createOpponent(req.userId!, sport, name);
+      const result = await fantasyService.createOpponent(req.userId!, sport, name);
       if (!result.ok) return res.status(400).json(result);
       res.json(result.opponent);
     } catch (err) {
@@ -512,11 +512,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/fantasy/opponents/:id", requireUser, (req, res) => {
+  app.delete("/api/fantasy/opponents/:id", requireUser, async (req, res) => {
     try {
       const id = cleanText(req.params.id, 64);
       if (!id) return res.status(400).json({ error: "opponent id required" });
-      const ok = fantasyService.deleteOpponent(req.userId!, id);
+      const ok = await fantasyService.deleteOpponent(req.userId!, id);
       if (!ok) return res.status(404).json({ error: "Opponent not found" });
       res.json({ ok: true });
     } catch (err) {
@@ -524,7 +524,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/fantasy/opponents/:id/add-player", requireUser, (req, res) => {
+  app.post("/api/fantasy/opponents/:id/add-player", requireUser, async (req, res) => {
     try {
       const id = cleanText(req.params.id, 64);
       if (!id) return res.status(400).json({ error: "opponent id required" });
@@ -532,7 +532,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!player || typeof player !== "object" || typeof player.id !== "string") {
         return res.status(400).json({ error: "player object with id required" });
       }
-      const result = fantasyService.addPlayerToOpponent(req.userId!, id, player);
+      const result = await fantasyService.addPlayerToOpponent(req.userId!, id, player);
       if (!result.ok) return res.status(400).json(result);
       res.json(result.opponent);
     } catch (err) {
@@ -540,13 +540,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/fantasy/opponents/:id/remove-player", requireUser, (req, res) => {
+  app.post("/api/fantasy/opponents/:id/remove-player", requireUser, async (req, res) => {
     try {
       const id = cleanText(req.params.id, 64);
       if (!id) return res.status(400).json({ error: "opponent id required" });
       const playerId = cleanText(req.body?.playerId, 64);
       if (!playerId) return res.status(400).json({ error: "playerId required" });
-      const updated = fantasyService.removePlayerFromOpponent(req.userId!, id, playerId);
+      const updated = await fantasyService.removePlayerFromOpponent(req.userId!, id, playerId);
       if (!updated) return res.status(404).json({ error: "Opponent not found" });
       res.json(updated);
     } catch (err) {
@@ -554,13 +554,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/fantasy/opponents/:id/rename", requireUser, (req, res) => {
+  app.post("/api/fantasy/opponents/:id/rename", requireUser, async (req, res) => {
     try {
       const id = cleanText(req.params.id, 64);
       if (!id) return res.status(400).json({ error: "opponent id required" });
       const name = cleanText(req.body?.name, 48);
       if (!name) return res.status(400).json({ error: "name required" });
-      const updated = fantasyService.renameOpponent(req.userId!, id, name);
+      const updated = await fantasyService.renameOpponent(req.userId!, id, name);
       if (!updated) return res.status(404).json({ error: "Opponent not found" });
       res.json(updated);
     } catch (err) {
@@ -683,9 +683,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ==================== FANTASY LEAGUES ====================
 
-  app.get("/api/leagues", requireUser, (req, res) => {
+  app.get("/api/leagues", requireUser, async (req, res) => {
     try {
-      const leagues = leaguesService.listUserLeagues(req.userId!);
+      const leagues = await leaguesService.listUserLeagues(req.userId!);
       res.json(leagues);
     } catch (err) {
       console.error("Error listing leagues:", err);
@@ -693,7 +693,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/leagues", requireUser, (req, res) => {
+  app.post("/api/leagues", requireUser, async (req, res) => {
     try {
       const body = req.body ?? {};
       const name = cleanText(body.name, 64);
@@ -703,7 +703,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const teamName = cleanText(body.teamName, 48);
       const maxRaw = Number(body.maxMembers);
       const maxMembers = Number.isFinite(maxRaw) ? maxRaw : undefined;
-      const league = leaguesService.createLeague({
+      const league = await leaguesService.createLeague({
         ownerId: req.userId!,
         name,
         sport,
@@ -717,13 +717,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/leagues/join", requireUser, (req, res) => {
+  app.post("/api/leagues/join", requireUser, async (req, res) => {
     try {
       const body = req.body ?? {};
       const inviteCode = cleanText(body.inviteCode, 12);
       if (!inviteCode) return res.status(400).json({ error: "inviteCode required" });
       const teamName = cleanText(body.teamName, 48);
-      const result = leaguesService.joinByCode({
+      const result = await leaguesService.joinByCode({
         userId: req.userId!,
         inviteCode,
         teamName,
@@ -735,11 +735,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/leagues/:id", requireUser, (req, res) => {
+  app.get("/api/leagues/:id", requireUser, async (req, res) => {
     try {
       const id = cleanText(req.params.id, 64);
       if (!id) return res.status(400).json({ error: "league id required" });
-      const league = leaguesService.getLeague(id);
+      const league = await leaguesService.getLeague(id);
       if (!league) return res.status(404).json({ error: "League not found" });
       // Ensure caller is a member before exposing details
       if (!league.members.some((m) => m.userId === req.userId)) {
@@ -751,68 +751,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/leagues/:id/standings", requireUser, (req, res) => {
+  app.get("/api/leagues/:id/standings", requireUser, async (req, res) => {
     try {
       const id = cleanText(req.params.id, 64);
       if (!id) return res.status(400).json({ error: "league id required" });
-      const league = leaguesService.getLeague(id);
+      const league = await leaguesService.getLeague(id);
       if (!league) return res.status(404).json({ error: "League not found" });
       if (!league.members.some((m) => m.userId === req.userId)) {
         return res.status(403).json({ error: "Not a member of this league" });
       }
-      res.json(leaguesService.getStandings(id));
+      res.json(await leaguesService.getStandings(id));
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch standings" });
     }
   });
 
-  app.get("/api/leagues/:id/matchups", requireUser, (req, res) => {
+  app.get("/api/leagues/:id/matchups", requireUser, async (req, res) => {
     try {
       const id = cleanText(req.params.id, 64);
       if (!id) return res.status(400).json({ error: "league id required" });
       const weekRaw = req.query.week;
       const week = weekRaw !== undefined ? clampInt(weekRaw, 1, 1, 52) : undefined;
-      const league = leaguesService.getLeague(id);
+      const league = await leaguesService.getLeague(id);
       if (!league) return res.status(404).json({ error: "League not found" });
       if (!league.members.some((m) => m.userId === req.userId)) {
         return res.status(403).json({ error: "Not a member of this league" });
       }
-      const matchups = leaguesService.getWeekMatchups(id, week);
+      const matchups = await leaguesService.getWeekMatchups(id, week);
       res.json({ week: week ?? league.currentWeek, matchups });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch matchups" });
     }
   });
 
-  app.post("/api/leagues/:id/schedule", requireUser, (req, res) => {
+  app.post("/api/leagues/:id/schedule", requireUser, async (req, res) => {
     try {
       const id = cleanText(req.params.id, 64);
       if (!id) return res.status(400).json({ error: "league id required" });
-      const league = leaguesService.getLeague(id);
+      const league = await leaguesService.getLeague(id);
       if (!league) return res.status(404).json({ error: "League not found" });
       if (league.ownerId !== req.userId) {
         return res.status(403).json({ error: "Only the league owner can generate a schedule" });
       }
       const weeksRaw = req.body?.weeks;
       const weeks = Number.isFinite(Number(weeksRaw)) ? Math.max(2, Math.min(26, Number(weeksRaw))) : 14;
-      const created = leaguesService.generateSchedule(id, weeks);
+      const created = await leaguesService.generateSchedule(id, weeks);
       res.json({ created });
     } catch (err) {
       res.status(500).json({ error: "Failed to generate schedule" });
     }
   });
 
-  app.post("/api/leagues/:id/settle", requireUser, (req, res) => {
+  app.post("/api/leagues/:id/settle", requireUser, async (req, res) => {
     try {
       const id = cleanText(req.params.id, 64);
       if (!id) return res.status(400).json({ error: "league id required" });
-      const league = leaguesService.getLeague(id);
+      const league = await leaguesService.getLeague(id);
       if (!league) return res.status(404).json({ error: "League not found" });
       if (league.ownerId !== req.userId) {
         return res.status(403).json({ error: "Only the league owner can settle a week" });
       }
       const week = clampInt(req.body?.week, league.currentWeek, 1, 52);
-      const result = leaguesService.settleWeek(id, week);
+      const result = await leaguesService.settleWeek(id, week);
       res.json(result);
     } catch (err) {
       res.status(500).json({ error: "Failed to settle week" });
@@ -1018,36 +1018,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ==================== USER PREFERENCES ====================
 
-  app.get("/api/preferences/:userId", requireUser, requireSelf(), (req, res) => {
+  app.get("/api/preferences/:userId", requireUser, requireSelf(), async (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
       }
-      const prefs = userPreferencesService.getPreferences(req.params.userId);
+      const prefs = await userPreferencesService.getPreferences(req.params.userId);
       res.json(prefs);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch preferences" });
     }
   });
 
-  app.patch("/api/preferences/:userId", requireUser, requireSelf(), (req, res) => {
+  app.patch("/api/preferences/:userId", requireUser, requireSelf(), async (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
       }
-      const updated = userPreferencesService.updatePreferences(req.params.userId, req.body);
+      const updated = await userPreferencesService.updatePreferences(req.params.userId, req.body);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: "Failed to update preferences" });
     }
   });
 
-  app.post("/api/preferences/:userId/reset", requireUser, requireSelf(), (req, res) => {
+  app.post("/api/preferences/:userId/reset", requireUser, requireSelf(), async (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
       }
-      const prefs = userPreferencesService.resetPreferences(req.params.userId);
+      const prefs = await userPreferencesService.resetPreferences(req.params.userId);
       res.json(prefs);
     } catch (error) {
       res.status(500).json({ error: "Failed to reset preferences" });
@@ -1063,7 +1063,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  app.post("/api/push/subscribe", requireUser, (req, res) => {
+  app.post("/api/push/subscribe", requireUser, async (req, res) => {
     try {
       const body = req.body ?? {};
       const endpoint = typeof body.endpoint === "string" ? body.endpoint : "";
@@ -1076,7 +1076,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (endpoint.length > 2048 || p256dh.length > 256 || auth.length > 256) {
         return res.status(400).json({ error: "subscription values too large" });
       }
-      const sub = pushService.subscribe(req.userId!, { endpoint, keys: { p256dh, auth } });
+      const sub = await pushService.subscribe(req.userId!, { endpoint, keys: { p256dh, auth } });
       res.json({ ok: true, endpoint: sub.endpoint });
     } catch (err) {
       console.error("Error subscribing to push:", err);
@@ -1084,11 +1084,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/push/unsubscribe", requireUser, (req, res) => {
+  app.post("/api/push/unsubscribe", requireUser, async (req, res) => {
     try {
       const endpoint = typeof req.body?.endpoint === "string" ? req.body.endpoint : "";
       if (!endpoint) return res.status(400).json({ error: "endpoint required" });
-      pushService.unsubscribe(endpoint);
+      await pushService.unsubscribe(endpoint);
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: "Failed to unsubscribe" });

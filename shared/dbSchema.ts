@@ -12,16 +12,14 @@ import {
 } from "drizzle-orm/pg-core";
 
 // -----------------------------------------------------------------------------
-// Drizzle schema — the shape of the database when a real Postgres (Neon or
-// otherwise) is provisioned. Run `npm run db:push` to apply.
-//
-// When DATABASE_URL is not set, services fall back to JSON-file persistence
-// (see server/db/persistence.ts) that mirrors this shape.
+// Drizzle schema — mirrors server/db/schema.sql exactly. Every table is
+// prefixed with `sports_` because the Supabase project is shared with other
+// apps (finance/education/etc.). Keep the two files in lockstep.
 // -----------------------------------------------------------------------------
 
 // Betting ------------------------------------------------------------------
 
-export const bettingAccounts = pgTable("betting_accounts", {
+export const bettingAccounts = pgTable("sports_betting_accounts", {
   userId: text("user_id").primaryKey(),
   balance: real("balance").notNull().default(10000),
   startingBalance: real("starting_balance").notNull().default(10000),
@@ -37,7 +35,7 @@ export const bettingAccounts = pgTable("betting_accounts", {
 });
 
 export const bets = pgTable(
-  "bets",
+  "sports_bets",
   {
     id: text("id").primaryKey(),
     userId: text("user_id").notNull(),
@@ -62,14 +60,14 @@ export const bets = pgTable(
     result: text("result"),
   },
   (t) => ({
-    userStatusIdx: index("bets_user_status_idx").on(t.userId, t.status),
-    gameIdx: index("bets_game_idx").on(t.gameId),
+    userStatusIdx: index("sports_bets_user_status_idx").on(t.userId, t.status),
+    gameIdx: index("sports_bets_game_idx").on(t.gameId),
   }),
 );
 
 // User preferences --------------------------------------------------------
 
-export const userPreferences = pgTable("user_preferences", {
+export const userPreferences = pgTable("sports_user_preferences", {
   userId: text("user_id").primaryKey(),
   payload: jsonb("payload").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -78,10 +76,11 @@ export const userPreferences = pgTable("user_preferences", {
 // Fantasy rosters ---------------------------------------------------------
 
 export const fantasyRosters = pgTable(
-  "fantasy_rosters",
+  "sports_fantasy_rosters",
   {
     userId: text("user_id").notNull(),
     sport: text("sport").notNull(),
+    players: jsonb("players").notNull().default("[]"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -89,25 +88,27 @@ export const fantasyRosters = pgTable(
   }),
 );
 
-export const fantasyRosterPlayers = pgTable(
-  "fantasy_roster_players",
+// Opponents (Simulate tab) -------------------------------------------------
+
+export const fantasyOpponents = pgTable(
+  "sports_fantasy_opponents",
   {
+    id: text("id").primaryKey(),
     userId: text("user_id").notNull(),
     sport: text("sport").notNull(),
-    playerId: text("player_id").notNull(),
-    position: text("position"),
-    playerData: jsonb("player_data").notNull(),
-    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+    name: text("name").notNull(),
+    players: jsonb("players").notNull().default("[]"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.userId, t.sport, t.playerId] }),
-    userSportIdx: index("roster_players_user_sport_idx").on(t.userId, t.sport),
+    userSportIdx: index("sports_opponents_user_sport_idx").on(t.userId, t.sport),
   }),
 );
 
 // Fantasy leagues ---------------------------------------------------------
 
-export const fantasyLeagues = pgTable("fantasy_leagues", {
+export const fantasyLeagues = pgTable("sports_fantasy_leagues", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   sport: text("sport").notNull(),
@@ -119,12 +120,12 @@ export const fantasyLeagues = pgTable("fantasy_leagues", {
   inviteCode: text("invite_code").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
-  inviteIdx: uniqueIndex("leagues_invite_code_idx").on(t.inviteCode),
-  ownerIdx: index("leagues_owner_idx").on(t.ownerId),
+  inviteIdx: uniqueIndex("sports_leagues_invite_code_idx").on(t.inviteCode),
+  ownerIdx: index("sports_leagues_owner_idx").on(t.ownerId),
 }));
 
 export const fantasyLeagueMembers = pgTable(
-  "fantasy_league_members",
+  "sports_fantasy_league_members",
   {
     leagueId: text("league_id").notNull(),
     userId: text("user_id").notNull(),
@@ -138,12 +139,12 @@ export const fantasyLeagueMembers = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.leagueId, t.userId] }),
-    userIdx: index("league_members_user_idx").on(t.userId),
+    userIdx: index("sports_league_members_user_idx").on(t.userId),
   }),
 );
 
 export const fantasyMatchups = pgTable(
-  "fantasy_matchups",
+  "sports_fantasy_matchups",
   {
     id: text("id").primaryKey(),
     leagueId: text("league_id").notNull(),
@@ -156,14 +157,14 @@ export const fantasyMatchups = pgTable(
     settledAt: timestamp("settled_at", { withTimezone: true }),
   },
   (t) => ({
-    leagueWeekIdx: index("matchups_league_week_idx").on(t.leagueId, t.week),
+    leagueWeekIdx: index("sports_matchups_league_week_idx").on(t.leagueId, t.week),
   }),
 );
 
 // Push subscriptions ------------------------------------------------------
 
 export const pushSubscriptions = pgTable(
-  "push_subscriptions",
+  "sports_push_subscriptions",
   {
     userId: text("user_id").notNull(),
     endpoint: text("endpoint").notNull(),
@@ -173,14 +174,12 @@ export const pushSubscriptions = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.endpoint] }),
-    endpointIdx: uniqueIndex("push_subs_endpoint_idx").on(t.endpoint),
+    endpointIdx: uniqueIndex("sports_push_subs_endpoint_idx").on(t.endpoint),
   }),
 );
 
-// News digest log (for dedup) --------------------------------------------
-
 export const sentNotifications = pgTable(
-  "sent_notifications",
+  "sports_sent_notifications",
   {
     userId: text("user_id").notNull(),
     articleId: text("article_id").notNull(),
@@ -188,6 +187,6 @@ export const sentNotifications = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.articleId] }),
-    timeIdx: index("sent_notifications_time_idx").on(t.sentAt),
+    timeIdx: index("sports_sent_notifications_time_idx").on(t.sentAt),
   }),
 );

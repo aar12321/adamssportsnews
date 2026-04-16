@@ -19,13 +19,13 @@ function newAccount(): MockAccount {
   };
 }
 
-function getOrCreateAccount(userId: string): MockAccount {
-  const existing = accountRepo.get(userId);
+async function getOrCreateAccount(userId: string): Promise<MockAccount> {
+  const existing = await accountRepo.get(userId);
   if (existing) return existing;
   return accountRepo.upsert(userId, newAccount());
 }
 
-function getUserBets(userId: string): MockBet[] {
+async function getUserBets(userId: string): Promise<MockBet[]> {
   return betsRepo.listByUser(userId);
 }
 
@@ -249,25 +249,25 @@ export class BettingService {
     };
   }
 
-  getAccount(userId: string): MockAccount {
+  async getAccount(userId: string): Promise<MockAccount> {
     return getOrCreateAccount(userId);
   }
 
-  getBets(userId: string): MockBet[] {
+  async getBets(userId: string): Promise<MockBet[]> {
     // Lazy settlement: settle any pending bets whose games should have
     // finished. Re-read after settlement so the caller gets fresh status.
     const now = Date.now();
-    const pending = getUserBets(userId);
+    const pending = await getUserBets(userId);
     let settledAny = false;
     for (const bet of pending) {
       if (bet.status === "pending" && bet.gameEndTime) {
         if (new Date(bet.gameEndTime).getTime() <= now) {
-          this.settleBet(userId, bet.id);
+          await this.settleBet(userId, bet.id);
           settledAny = true;
         }
       }
     }
-    return settledAny ? getUserBets(userId) : pending;
+    return settledAny ? await getUserBets(userId) : pending;
   }
 
   /** Estimate when a game finishes based on sport */
@@ -287,8 +287,11 @@ export class BettingService {
     return new Date(start.getTime() + minutes * 60 * 1000).toISOString();
   }
 
-  placeBet(userId: string, bet: Omit<MockBet, "id" | "placedAt" | "status" | "potentialPayout">): MockBet | { error: string } {
-    const account = getOrCreateAccount(userId);
+  async placeBet(
+    userId: string,
+    bet: Omit<MockBet, "id" | "placedAt" | "status" | "potentialPayout">,
+  ): Promise<MockBet | { error: string }> {
+    const account = await getOrCreateAccount(userId);
 
     if (bet.amount <= 0) return { error: "Bet amount must be positive" };
     if (bet.amount > account.balance) return { error: "Insufficient balance" };
@@ -323,16 +326,16 @@ export class BettingService {
     account.balance = Math.round(account.balance * 100) / 100;
     account.totalBets += 1;
     account.totalWagered += bet.amount;
-    accountRepo.upsert(userId, account);
+    await accountRepo.upsert(userId, account);
 
-    betsRepo.add(userId, newBet);
+    await betsRepo.add(userId, newBet);
 
     return newBet;
   }
 
-  settleBet(userId: string, betId: string): void {
-    const account = getOrCreateAccount(userId);
-    const userBets = getUserBets(userId);
+  async settleBet(userId: string, betId: string): Promise<void> {
+    const account = await getOrCreateAccount(userId);
+    const userBets = await getUserBets(userId);
     const bet = userBets.find(b => b.id === betId);
 
     if (!bet || bet.status !== "pending") return;
@@ -364,40 +367,40 @@ export class BettingService {
     }
 
     patch.settledAt = new Date().toISOString();
-    betsRepo.update(userId, betId, patch);
+    await betsRepo.update(userId, betId, patch);
 
     // Update stats — re-read after update so winRate reflects the latest row
-    const refreshed = betsRepo.listByUser(userId);
+    const refreshed = await betsRepo.listByUser(userId);
     const settledBets = refreshed.filter(b => b.status !== "pending" && b.status !== "cancelled");
     const wonCount = settledBets.filter(b => b.status === "won").length;
     account.winRate = settledBets.length > 0 ? wonCount / settledBets.length : 0;
     account.roi = account.totalWagered > 0 ? (account.totalProfit / account.totalWagered) * 100 : 0;
     account.balance = Math.round(account.balance * 100) / 100;
-    accountRepo.upsert(userId, account);
+    await accountRepo.upsert(userId, account);
   }
 
-  cancelBet(userId: string, betId: string): MockBet | { error: string } {
-    const account = getOrCreateAccount(userId);
-    const userBets = getUserBets(userId);
+  async cancelBet(userId: string, betId: string): Promise<MockBet | { error: string }> {
+    const account = await getOrCreateAccount(userId);
+    const userBets = await getUserBets(userId);
     const bet = userBets.find(b => b.id === betId);
 
     if (!bet) return { error: "Bet not found" };
     if (bet.status !== "pending") return { error: "Can only cancel pending bets" };
 
-    const updated = betsRepo.update(userId, betId, { status: "cancelled" });
+    const updated = await betsRepo.update(userId, betId, { status: "cancelled" });
     account.balance += bet.amount;
     account.totalBets -= 1;
     account.totalWagered -= bet.amount;
     account.balance = Math.round(account.balance * 100) / 100;
-    accountRepo.upsert(userId, account);
+    await accountRepo.upsert(userId, account);
 
     return updated ?? bet;
   }
 
-  resetAccount(userId: string): MockAccount {
+  async resetAccount(userId: string): Promise<MockAccount> {
     const account = newAccount();
-    accountRepo.upsert(userId, account);
-    betsRepo.removeAllForUser(userId);
+    await accountRepo.upsert(userId, account);
+    await betsRepo.removeAllForUser(userId);
     return account;
   }
 
@@ -406,13 +409,13 @@ export class BettingService {
    * Called from a periodic background task so bets don't sit `pending`
    * forever when the user never re-opens the app.
    */
-  settleDueBetsForAllUsers(): number {
+  async settleDueBetsForAllUsers(): Promise<number> {
     const now = Date.now();
-    const pending = betsRepo.listAllPending();
+    const pending = await betsRepo.listAllPending();
     let settled = 0;
     for (const { userId, bet } of pending) {
       if (bet.gameEndTime && new Date(bet.gameEndTime).getTime() <= now) {
-        this.settleBet(userId, bet.id);
+        await this.settleBet(userId, bet.id);
         settled += 1;
       }
     }

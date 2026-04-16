@@ -313,50 +313,49 @@ export class FantasyService {
 
   // --- Per-user persistent rosters ----------------------------------------
 
-  getRoster(userId: string, sport: string): FantasyPlayer[] {
+  async getRoster(userId: string, sport: string): Promise<FantasyPlayer[]> {
     return rosterRepo.getBySport(userId, sport);
   }
 
-  getAllRosters(userId: string): Record<string, FantasyPlayer[]> {
+  async getAllRosters(userId: string): Promise<Record<string, FantasyPlayer[]>> {
     return rosterRepo.getAll(userId);
   }
 
-  addToRoster(
+  async addToRoster(
     userId: string,
     sport: string,
     player: FantasyPlayer & { id: string },
-  ): { ok: true; players: FantasyPlayer[] } | { ok: false; reason: string } {
-    const current = rosterRepo.getBySport(userId, sport);
+  ): Promise<{ ok: true; players: FantasyPlayer[] } | { ok: false; reason: string }> {
+    const current = await rosterRepo.getBySport(userId, sport);
     const result = validateRosterAddition(current, player, sport);
     if (!result.ok) return { ok: false, reason: result.reason };
     const next = [...current, player];
-    rosterRepo.setBySport(userId, sport, next);
+    await rosterRepo.setBySport(userId, sport, next);
     return { ok: true, players: next };
   }
 
-  removeFromRoster(userId: string, sport: string, playerId: string): FantasyPlayer[] {
-    const current = rosterRepo.getBySport(userId, sport);
+  async removeFromRoster(userId: string, sport: string, playerId: string): Promise<FantasyPlayer[]> {
+    const current = await rosterRepo.getBySport(userId, sport);
     const next = current.filter((p) => p.id !== playerId);
-    rosterRepo.setBySport(userId, sport, next);
+    await rosterRepo.setBySport(userId, sport, next);
     return next;
   }
 
-  resetRoster(userId: string, sport: string): void {
-    rosterRepo.clearSport(userId, sport);
+  async resetRoster(userId: string, sport: string): Promise<void> {
+    await rosterRepo.clearSport(userId, sport);
   }
 
   // --- Opponent mock lineups (for matchup simulation) --------------------
 
   private readonly MAX_OPPONENTS_PER_SPORT = 8;
 
-  listOpponents(userId: string, sport: string): OpponentRecord[] {
+  async listOpponents(userId: string, sport: string): Promise<OpponentRecord[]> {
     return opponentsRepo.listByUserSport(userId, sport);
   }
 
-  createOpponent(userId: string, sport: string, name: string):
-    | { ok: true; opponent: OpponentRecord }
-    | { ok: false; reason: string } {
-    const existing = opponentsRepo.listByUserSport(userId, sport);
+  async createOpponent(userId: string, sport: string, name: string):
+    Promise<{ ok: true; opponent: OpponentRecord } | { ok: false; reason: string }> {
+    const existing = await opponentsRepo.listByUserSport(userId, sport);
     if (existing.length >= this.MAX_OPPONENTS_PER_SPORT) {
       return { ok: false, reason: `Max ${this.MAX_OPPONENTS_PER_SPORT} opponents per sport` };
     }
@@ -370,23 +369,23 @@ export class FantasyService {
       createdAt: now,
       updatedAt: now,
     };
-    opponentsRepo.create(opponent);
+    await opponentsRepo.create(opponent);
     return { ok: true, opponent };
   }
 
-  deleteOpponent(userId: string, opponentId: string): boolean {
-    const o = opponentsRepo.get(opponentId);
+  async deleteOpponent(userId: string, opponentId: string): Promise<boolean> {
+    const o = await opponentsRepo.get(opponentId);
     if (!o || o.userId !== userId) return false;
-    opponentsRepo.delete(opponentId);
+    await opponentsRepo.delete(opponentId);
     return true;
   }
 
-  addPlayerToOpponent(
+  async addPlayerToOpponent(
     userId: string,
     opponentId: string,
     player: FantasyPlayer,
-  ): { ok: true; opponent: OpponentRecord } | { ok: false; reason: string } {
-    const opponent = opponentsRepo.get(opponentId);
+  ): Promise<{ ok: true; opponent: OpponentRecord } | { ok: false; reason: string }> {
+    const opponent = await opponentsRepo.get(opponentId);
     if (!opponent || opponent.userId !== userId) {
       return { ok: false, reason: "Opponent not found" };
     }
@@ -394,29 +393,29 @@ export class FantasyService {
     // lineup is also legal (positions match, no duplicates, fits the sport).
     const result = validateRosterAddition(opponent.players, player, opponent.sport);
     if (!result.ok) return { ok: false, reason: result.reason };
-    const updated = opponentsRepo.update(opponentId, {
+    const updated = await opponentsRepo.update(opponentId, {
       players: [...opponent.players, player],
     });
     return { ok: true, opponent: updated! };
   }
 
-  removePlayerFromOpponent(
+  async removePlayerFromOpponent(
     userId: string,
     opponentId: string,
     playerId: string,
-  ): OpponentRecord | null {
-    const opponent = opponentsRepo.get(opponentId);
+  ): Promise<OpponentRecord | null> {
+    const opponent = await opponentsRepo.get(opponentId);
     if (!opponent || opponent.userId !== userId) return null;
     const players = opponent.players.filter((p) => p.id !== playerId);
-    return opponentsRepo.update(opponentId, { players }) ?? null;
+    return (await opponentsRepo.update(opponentId, { players })) ?? null;
   }
 
-  renameOpponent(userId: string, opponentId: string, name: string): OpponentRecord | null {
-    const opponent = opponentsRepo.get(opponentId);
+  async renameOpponent(userId: string, opponentId: string, name: string): Promise<OpponentRecord | null> {
+    const opponent = await opponentsRepo.get(opponentId);
     if (!opponent || opponent.userId !== userId) return null;
-    return opponentsRepo.update(opponentId, {
+    return (await opponentsRepo.update(opponentId, {
       name: name.trim().slice(0, 48) || opponent.name,
-    }) ?? null;
+    })) ?? null;
   }
 }
 

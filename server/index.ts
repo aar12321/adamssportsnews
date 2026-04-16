@@ -101,9 +101,9 @@ app.use((req, res, next) => {
     if (process.env.DISABLE_WORKERS !== "true") {
       startLiveScoresWorker();
       startNewsAlertsWorker();
-      setInterval(() => {
+      setInterval(async () => {
         try {
-          const n = bettingService.settleDueBetsForAllUsers();
+          const n = await bettingService.settleDueBetsForAllUsers();
           if (n > 0) log(`[bet-settler] settled ${n} bets`);
         } catch (err) {
           console.error("[bet-settler] sweep failed:", err);

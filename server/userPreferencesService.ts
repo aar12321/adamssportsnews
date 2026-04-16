@@ -42,25 +42,28 @@ const defaultPreferences: UserPreferences = {
 };
 
 export class UserPreferencesService {
-  getPreferences(userId: string = "default"): UserPreferences {
-    const existing = preferencesRepo.get(userId);
+  async getPreferences(userId: string = "default"): Promise<UserPreferences> {
+    const existing = await preferencesRepo.get(userId);
     if (existing) return existing;
     const fresh: UserPreferences = { ...defaultPreferences, userId };
-    preferencesRepo.upsert(userId, fresh);
+    await preferencesRepo.upsert(userId, fresh);
     return fresh;
   }
 
-  updatePreferences(userId: string = "default", updates: Partial<UserPreferences>): UserPreferences {
-    const current = this.getPreferences(userId);
+  async updatePreferences(
+    userId: string = "default",
+    updates: Partial<UserPreferences>,
+  ): Promise<UserPreferences> {
+    const current = await this.getPreferences(userId);
     const updated = this.deepMerge(current, updates) as UserPreferences;
     updated.userId = userId;
-    preferencesRepo.upsert(userId, updated);
+    await preferencesRepo.upsert(userId, updated);
     return updated;
   }
 
-  resetPreferences(userId: string = "default"): UserPreferences {
+  async resetPreferences(userId: string = "default"): Promise<UserPreferences> {
     const fresh: UserPreferences = { ...defaultPreferences, userId };
-    preferencesRepo.upsert(userId, fresh);
+    await preferencesRepo.upsert(userId, fresh);
     return fresh;
   }
 

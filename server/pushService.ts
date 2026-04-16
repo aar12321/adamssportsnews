@@ -50,7 +50,7 @@ export class PushService {
     return VAPID_PUBLIC_KEY;
   }
 
-  subscribe(userId: string, sub: { endpoint: string; keys: { p256dh: string; auth: string } }): PushSubscriptionRecord {
+  async subscribe(userId: string, sub: { endpoint: string; keys: { p256dh: string; auth: string } }): Promise<PushSubscriptionRecord> {
     const record: PushSubscriptionRecord = {
       userId,
       endpoint: sub.endpoint,
@@ -61,14 +61,14 @@ export class PushService {
     return pushRepo.add(record);
   }
 
-  unsubscribe(endpoint: string): void {
-    pushRepo.removeByEndpoint(endpoint);
+  async unsubscribe(endpoint: string): Promise<void> {
+    await pushRepo.removeByEndpoint(endpoint);
   }
 
   /** Send a push to one user. Returns how many endpoints received it. */
   async sendToUser(userId: string, payload: PushPayload): Promise<number> {
     if (!pushConfigured) return 0;
-    const subs = pushRepo.listByUser(userId);
+    const subs = await pushRepo.listByUser(userId);
     let sent = 0;
     await Promise.all(
       subs.map(async (sub) => {
@@ -84,7 +84,7 @@ export class PushService {
         } catch (err: any) {
           // 404/410 → subscription is dead, prune it
           if (err?.statusCode === 404 || err?.statusCode === 410) {
-            pushRepo.removeByEndpoint(sub.endpoint);
+            await pushRepo.removeByEndpoint(sub.endpoint);
           } else {
             console.warn(`[push] send failed (${err?.statusCode}):`, err?.message || err);
           }
@@ -97,14 +97,14 @@ export class PushService {
   /** Broadcast to every user whose notification preferences opt in to `category`. */
   async broadcastByCategory(category: PushPayload["category"], payload: PushPayload, articleId?: string): Promise<number> {
     if (!pushConfigured) return 0;
-    const users = preferencesRepo.all();
+    const users = await preferencesRepo.all();
     let delivered = 0;
     await Promise.all(
       users.map(async (prefs) => {
         if (!this.userWantsCategory(prefs, category)) return;
-        if (articleId && sentNotificationsRepo.hasSeen(prefs.userId, articleId)) return;
+        if (articleId && (await sentNotificationsRepo.hasSeen(prefs.userId, articleId))) return;
         const n = await this.sendToUser(prefs.userId, payload);
-        if (n > 0 && articleId) sentNotificationsRepo.markSent(prefs.userId, articleId);
+        if (n > 0 && articleId) await sentNotificationsRepo.markSent(prefs.userId, articleId);
         delivered += n;
       }),
     );
