@@ -1,23 +1,78 @@
 import { QueryClient } from "@tanstack/react-query";
+import { supabase } from "./supabase";
+
+/**
+ * Grab the current Supabase session access token for outgoing API calls.
+ * Returns undefined if the user is signed out or Supabase is not configured.
+ */
+async function getAuthToken(): Promise<string | undefined> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Install a one-time `window.fetch` interceptor so EVERY call that targets
+// our own API surface (/api/...) picks up the Supabase Bearer token without
+// the callsite having to remember. Idempotent — safe to import multiple
+// times during HMR. External URLs are untouched.
+declare global {
+  interface Window {
+    __apiFetchPatched?: boolean;
+  }
+}
+if (typeof window !== "undefined" && !window.__apiFetchPatched) {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+    const isApi =
+      url.startsWith("/api/") ||
+      url.startsWith(window.location.origin + "/api/");
+    if (!isApi) return originalFetch(input, init);
+    const headers = new Headers(init?.headers || {});
+    if (!headers.has("Authorization")) {
+      const token = await getAuthToken();
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+    }
+    return originalFetch(input, { ...init, headers });
+  };
+  window.__apiFetchPatched = true;
+}
 
 /**
  * Fetch JSON from an API endpoint with consistent error handling and a
  * sensible default request timeout. Throws a typed Error on any non-2xx
  * response (or network/timeout failure) so React Query can surface it.
+ *
+ * Automatically attaches the Supabase access token as a Bearer header so
+ * the server can enforce ownership. No-op for unauthenticated calls.
  */
 export async function apiRequest<T = any>(
   method: string,
   url: string,
   data?: unknown,
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; skipAuth?: boolean },
 ): Promise<T> {
   const timeoutMs = opts?.timeoutMs ?? 15000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers: Record<string, string> = {};
+    if (data) headers["Content-Type"] = "application/json";
+    if (!opts?.skipAuth) {
+      const token = await getAuthToken();
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    }
     const res = await fetch(url, {
       method,
-      headers: data ? { "Content-Type": "application/json" } : {},
+      headers,
       body: data ? JSON.stringify(data) : undefined,
       credentials: "include",
       signal: controller.signal,
