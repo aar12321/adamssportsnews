@@ -79,8 +79,15 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
   // Update userId when user changes + hydrate from server so preferences
   // sync across devices. Server is authoritative when both sources exist;
   // localStorage acts as a fast-path cache.
+  //
+  // On sign-out (`!user`) we reset state to defaults so user A's edits
+  // don't leak into the unauthenticated UI or to a user B who signs in
+  // next on the same browser.
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setPreferences({ ...defaultPreferences, userId: "default" });
+      return;
+    }
     let cancelled = false;
     (async () => {
       // Fast-path: local cache
@@ -89,19 +96,21 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
         if (stored && !cancelled) {
           setPreferences((prev) => ({ ...prev, ...JSON.parse(stored), userId }));
         } else if (!cancelled) {
-          const displayName = user.user_metadata?.display_name || user.email?.split("@")[0] || "Sports Fan";
-          setPreferences((prev) => ({
-            ...prev,
-            userId,
-            displayName: prev.displayName === "Sports Fan" ? displayName : prev.displayName,
-          }));
+          // Start from defaults (not whatever the previous user left in
+          // memory) and seed the display name from auth metadata.
+          const displayName =
+            user.user_metadata?.display_name ||
+            user.email?.split("@")[0] ||
+            "Sports Fan";
+          setPreferences({ ...defaultPreferences, userId, displayName });
         }
       } catch {
-        if (!cancelled) setPreferences((prev) => ({ ...prev, userId }));
+        if (!cancelled) setPreferences({ ...defaultPreferences, userId });
       }
 
-      // Authoritative: server. Only merges non-default values so we don't
-      // silently overwrite client-only edits still in the outbound debounce.
+      // Authoritative: server. Only merges if the returned userId matches
+      // what we asked for (otherwise a late-arriving response for a prior
+      // user could overwrite the current user's state).
       try {
         setIsLoading(true);
         const res = await fetch(`/api/preferences/${userId}`);
@@ -120,8 +129,13 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
     return () => { cancelled = true; };
   }, [userId, storageKey, user]);
 
-  // Sync to server
+  // Sync to server. Skip when unauthenticated (preferences.userId ===
+  // "default") or when local state drifted out of sync with the current
+  // userId — both cases would produce 401s or corrupt another user's
+  // prefs. Local cache still saves via the next effect.
   useEffect(() => {
+    if (!user || !userId || userId === "default") return;
+    if (preferences.userId !== userId) return;
     const timeout = setTimeout(async () => {
       try {
         await fetch(`/api/preferences/${userId}`, {

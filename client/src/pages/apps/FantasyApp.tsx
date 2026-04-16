@@ -397,6 +397,20 @@ function TradeAnalyzer({
     setShowAnalysis(false);
   }, [sportKey]);
 
+  // Prune "giving" to only players still on the roster. If the user drops
+  // a player from their roster in another tab while they had that player
+  // selected as a trade offer, the chip would disappear from the UI but
+  // the stale id would still be sent to /analyze. Keep the selection in
+  // lockstep with the live roster.
+  useEffect(() => {
+    setGiving((prev) => {
+      const rosterIds = new Set(roster.map((p: any) => p.id));
+      const next = prev.filter((p) => rosterIds.has(p.id));
+      if (next.length !== prev.length) setShowAnalysis(false);
+      return next.length === prev.length ? prev : next;
+    });
+  }, [roster]);
+
   // Searchable pool: query the server. Everything in /api/fantasy/players/search
   // is reachable — no arbitrary slice.
   const { data: searchResults, isFetching: isSearching } = useQuery({

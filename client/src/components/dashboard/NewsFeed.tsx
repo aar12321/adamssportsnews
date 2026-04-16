@@ -133,14 +133,16 @@ export default function NewsFeed({
       );
     }
 
-    // Stable sort by (personal score desc, publishedAt desc) so relevant
-    // news bubbles up without hiding the general feed.
+    // Stable sort by (personal score desc, publishedAt desc, id asc) so
+    // relevant news bubbles up and tied articles don't flicker between
+    // renders when favorites change.
     articles = articles.slice().sort((a: any, b: any) => {
       const s = (b._personalScore ?? 0) - (a._personalScore ?? 0);
       if (s !== 0) return s;
       const ta = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
       const tb = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
-      return tb - ta;
+      if (ta !== tb) return tb - ta;
+      return String(a.id ?? "").localeCompare(String(b.id ?? ""));
     });
 
     return articles.slice(0, count);

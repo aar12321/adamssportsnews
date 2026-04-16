@@ -89,13 +89,10 @@ export class LeaguesService {
   }
 
   listUserLeagues(userId: string): LeagueSummary[] {
-    return leaguesRepo
-      .listLeaguesForUser(userId)
-      .map((l) => ({
-        ...l,
-        members: leaguesRepo.listMembers(l.id),
-        memberCount: leaguesRepo.listMembers(l.id).length,
-      }));
+    return leaguesRepo.listLeaguesForUser(userId).map((l) => {
+      const members = leaguesRepo.listMembers(l.id);
+      return { ...l, members, memberCount: members.length };
+    });
   }
 
   joinByCode(params: { userId: string; inviteCode: string; teamName?: string }):
@@ -207,6 +204,10 @@ export class LeaguesService {
     let settled = 0;
     for (const m of weekMatchups) {
       if (m.status === "final") continue;
+      // Defensive: a matchup must have two distinct users. Nothing should
+      // produce a self-matchup (generateSchedule filters byes), but if
+      // data gets corrupted we skip rather than inflate standings.
+      if (m.homeUserId === m.awayUserId) continue;
       const homeScore = Math.round(this.scoreMember(leagueId, m.homeUserId) * 100) / 100;
       const awayScore = Math.round(this.scoreMember(leagueId, m.awayUserId) * 100) / 100;
       leaguesRepo.updateMatchup(m.id, {
