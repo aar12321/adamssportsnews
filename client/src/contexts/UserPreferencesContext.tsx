@@ -76,21 +76,48 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
   });
   const [isLoading, setIsLoading] = useState(false);
 
-  // Update userId when user changes
+  // Update userId when user changes + hydrate from server so preferences
+  // sync across devices. Server is authoritative when both sources exist;
+  // localStorage acts as a fast-path cache.
   useEffect(() => {
-    if (user) {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      // Fast-path: local cache
       try {
         const stored = localStorage.getItem(storageKey);
-        if (stored) {
-          setPreferences(prev => ({ ...prev, ...JSON.parse(stored), userId }));
-        } else {
+        if (stored && !cancelled) {
+          setPreferences((prev) => ({ ...prev, ...JSON.parse(stored), userId }));
+        } else if (!cancelled) {
           const displayName = user.user_metadata?.display_name || user.email?.split("@")[0] || "Sports Fan";
-          setPreferences(prev => ({ ...prev, userId, displayName: prev.displayName === "Sports Fan" ? displayName : prev.displayName }));
+          setPreferences((prev) => ({
+            ...prev,
+            userId,
+            displayName: prev.displayName === "Sports Fan" ? displayName : prev.displayName,
+          }));
         }
       } catch {
-        setPreferences(prev => ({ ...prev, userId }));
+        if (!cancelled) setPreferences((prev) => ({ ...prev, userId }));
       }
-    }
+
+      // Authoritative: server. Only merges non-default values so we don't
+      // silently overwrite client-only edits still in the outbound debounce.
+      try {
+        setIsLoading(true);
+        const res = await fetch(`/api/preferences/${userId}`);
+        if (res.ok && !cancelled) {
+          const remote = await res.json();
+          if (remote && typeof remote === "object" && remote.userId === userId) {
+            setPreferences((prev) => ({ ...prev, ...remote, userId }));
+          }
+        }
+      } catch {
+        /* offline / unauthenticated — local state stays authoritative */
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [userId, storageKey, user]);
 
   // Sync to server

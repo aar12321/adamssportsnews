@@ -1,11 +1,14 @@
 import React, { useState, useMemo, useCallback, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { APP_SPORTS, getUserAppSports } from "@shared/appSports";
 import { useUserPreferences } from "@/contexts/UserPreferencesContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { apiRequest } from "@/lib/queryClient";
 import {
   BarChart3, ChevronLeft, Search, TrendingUp, Users, ArrowLeftRight,
-  Trophy, Activity, Target, Star, Flame, ChevronRight, Award
+  Trophy, Activity, Target, Star, Flame, ChevronRight, Award,
+  UserPlus, Eye, EyeOff, Check
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
@@ -72,6 +75,24 @@ function TeamCard({ team, onClick, isSelected }: { team: any; onClick: () => voi
 
 function TeamDetail({ team }: { team: any }) {
   const statEntries = Object.entries(team.stats || {}).slice(0, 8);
+  const { preferences, updatePreferences } = useUserPreferences();
+  const isTracked = preferences.analyst.trackedTeams.includes(team.id);
+  const isFavorite = preferences.favoriteTeams.includes(team.name);
+
+  const toggleTrack = () => {
+    const next = isTracked
+      ? preferences.analyst.trackedTeams.filter((id) => id !== team.id)
+      : [...preferences.analyst.trackedTeams, team.id];
+    updatePreferences({
+      analyst: { ...preferences.analyst, trackedTeams: next },
+    });
+  };
+  const toggleFavorite = () => {
+    const next = isFavorite
+      ? preferences.favoriteTeams.filter((n) => n !== team.name)
+      : [...preferences.favoriteTeams, team.name];
+    updatePreferences({ favoriteTeams: next });
+  };
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -86,6 +107,36 @@ function TeamDetail({ team }: { team: any }) {
             <p className="text-2xl font-bold text-foreground">{team.record}</p>
             <p className="text-xs text-muted-foreground">({(team.winPct * 100).toFixed(1)}%)</p>
           </div>
+        </div>
+
+        {/* Cross-app actions: make this team show up in Analyst's "tracked"
+             list and/or in the user's favoriteTeams (which drives News "For
+             you" and score filters). */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button
+            onClick={toggleTrack}
+            className={cn(
+              "text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1.5",
+              isTracked
+                ? "border-yellow-500/40 bg-yellow-500/10 text-yellow-300"
+                : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40",
+            )}
+          >
+            {isTracked ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            {isTracked ? "Tracking" : "Track team"}
+          </button>
+          <button
+            onClick={toggleFavorite}
+            className={cn(
+              "text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1.5",
+              isFavorite
+                ? "border-primary/40 bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40",
+            )}
+          >
+            <Star className="w-3.5 h-3.5" />
+            {isFavorite ? "Favorite" : "Favorite team"}
+          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-4">
@@ -354,8 +405,64 @@ function LeagueLeaders({ sport }: { sport: string }) {
   );
 }
 
-function PlayerDetail({ player }: { player: any }) {
+function PlayerDetail({ player, sport }: { player: any; sport: string }) {
   const statEntries = Object.entries(player.stats || {});
+  const { user } = useAuth();
+  const { preferences, updatePreferences } = useUserPreferences();
+  const isTracked = preferences.analyst.trackedPlayers.includes(player.id);
+
+  const toggleTrack = () => {
+    const next = isTracked
+      ? preferences.analyst.trackedPlayers.filter((id) => id !== player.id)
+      : [...preferences.analyst.trackedPlayers, player.id];
+    updatePreferences({
+      analyst: { ...preferences.analyst, trackedPlayers: next },
+    });
+  };
+
+  // Convert an analyst Player (stats/age/etc) into a FantasyPlayer shape
+  // the roster endpoint can validate. Missing point fields default to 0 so
+  // the player shows up but doesn't inflate projections.
+  const toFantasyPayload = () => ({
+    id: player.id,
+    name: player.name,
+    team: player.team,
+    position: player.position,
+    sport,
+    weeklyPoints: 0,
+    seasonPoints: 0,
+    projectedPoints: 0,
+    averagePoints: 0,
+    status: player.status || "active",
+    stats: player.stats || {},
+    recentNews: player.news || [],
+    injuryNote: player.injuryNote,
+  });
+
+  const addToRoster = useMutation({
+    mutationFn: () =>
+      apiRequest<{ ok: boolean; players: any[]; reason?: string }>(
+        "POST",
+        "/api/fantasy/roster/add",
+        { sport, player: toFantasyPayload() },
+      ),
+  });
+
+  const addMsg = addToRoster.isSuccess
+    ? "Added to your roster"
+    : addToRoster.error
+      ? (() => {
+          const msg = String(addToRoster.error.message || "");
+          const after = msg.slice(msg.indexOf(":") + 1).trim();
+          try {
+            const parsed = JSON.parse(after);
+            return parsed?.reason || parsed?.error || after || "Could not add";
+          } catch {
+            return after || "Could not add";
+          }
+        })()
+      : null;
+
   return (
     <div className="space-y-4 animate-fade-in">
       <div className="glass-card p-5">
@@ -395,6 +502,61 @@ function PlayerDetail({ player }: { player: any }) {
           <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl mb-4">
             <p className="text-xs text-orange-400">{player.injuryNote}</p>
           </div>
+        )}
+
+        {/* Cross-app actions */}
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={toggleTrack}
+            className={cn(
+              "text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1.5",
+              isTracked
+                ? "border-yellow-500/40 bg-yellow-500/10 text-yellow-300"
+                : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40",
+            )}
+          >
+            {isTracked ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            {isTracked ? "Tracking" : "Track player"}
+          </button>
+          {user && (
+            <button
+              onClick={() => addToRoster.mutate()}
+              disabled={addToRoster.isPending || addToRoster.isSuccess}
+              className={cn(
+                "text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1.5 disabled:opacity-50",
+                addToRoster.isSuccess
+                  ? "border-green-500/40 bg-green-500/10 text-green-300"
+                  : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40",
+              )}
+            >
+              {addToRoster.isSuccess ? (
+                <Check className="w-3.5 h-3.5" />
+              ) : (
+                <UserPlus className="w-3.5 h-3.5" />
+              )}
+              {addToRoster.isPending
+                ? "Adding…"
+                : addToRoster.isSuccess
+                ? "On your roster"
+                : "Add to fantasy roster"}
+            </button>
+          )}
+          <Link
+            href={`/apps/fantasy`}
+            className="text-xs px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
+          >
+            Open Fantasy
+          </Link>
+        </div>
+        {addMsg && (
+          <p
+            className={cn(
+              "text-xs mt-2",
+              addToRoster.isSuccess ? "text-green-400" : "text-red-400",
+            )}
+          >
+            {addMsg}
+          </p>
         )}
       </div>
 
@@ -723,7 +885,7 @@ export default function AnalystApp() {
                 <ChevronLeft className="w-4 h-4" />
                 Back to list
               </button>
-              <PlayerDetail player={selectedPlayer} />
+              <PlayerDetail player={selectedPlayer} sport={selectedSport} />
             </div>
           ) : (
             <div className="space-y-4">
@@ -763,6 +925,10 @@ export default function AnalystApp() {
                   </ResponsiveContainer>
                 </div>
               )}
+
+              {/* League leaders — previously orphaned, now surfaces
+                   here so the default state is actually informative. */}
+              <LeagueLeaders sport={selectedSport} />
 
               <div className="glass-card p-6 text-center">
                 <BarChart3 className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
