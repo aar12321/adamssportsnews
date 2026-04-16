@@ -1,14 +1,22 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   User, Palette, Bell, LayoutDashboard, Trophy, Target, Smartphone,
   Monitor, Sun, Moon, ChevronRight, Check, Save, RotateCcw,
-  Shield, Activity, AlertCircle, DollarSign, Users, BarChart3, LogOut, Mail
+  Shield, Activity, AlertCircle, DollarSign, Users, BarChart3, LogOut, Mail,
+  BellRing, BellOff
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useViewMode } from "@/contexts/ViewModeContext";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  disablePushNotifications,
+  enablePushNotifications,
+  getPushStatus,
+  sendTestPush,
+  type PushStatus,
+} from "@/lib/pushClient";
 
 const SPORTS = [
   { key: "basketball", label: "Basketball (NBA)", emoji: "🏀" },
@@ -464,6 +472,7 @@ export default function Profile() {
                   onChange={v => updateNotifications({ bettingAlerts: v })}
                 />
               </div>
+              <PushNotificationsPanel />
             </Section>
           )}
 
@@ -531,6 +540,113 @@ export default function Profile() {
                 </div>
               </div>
             </Section>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Push notification subscribe/unsubscribe panel ------------------------
+function PushNotificationsPanel() {
+  const [status, setStatus] = useState<PushStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    getPushStatus().then((s) => { if (alive) setStatus(s); });
+    return () => { alive = false; };
+  }, []);
+
+  const refresh = async () => setStatus(await getPushStatus());
+
+  if (!status) {
+    return <div className="mt-4 h-20 rounded-xl bg-muted/30 animate-pulse" />;
+  }
+
+  if (!status.supported) {
+    return (
+      <div className="mt-4 p-4 rounded-xl border border-border bg-muted/30">
+        <p className="text-sm font-semibold mb-1">Push notifications unavailable</p>
+        <p className="text-xs text-muted-foreground">
+          This browser doesn't support web push. Open the app in a recent
+          Chrome, Edge, Firefox, or Safari.
+        </p>
+      </div>
+    );
+  }
+
+  if (!status.configured) {
+    return (
+      <div className="mt-4 p-4 rounded-xl border border-border bg-muted/30">
+        <p className="text-sm font-semibold mb-1">Push not configured on this server</p>
+        <p className="text-xs text-muted-foreground">
+          Set <code>VAPID_PUBLIC_KEY</code> / <code>VAPID_PRIVATE_KEY</code> env vars
+          (generate with <code>npx web-push generate-vapid-keys</code>) and restart.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 p-4 rounded-xl border border-border bg-muted/30">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold flex items-center gap-2">
+            {status.subscribed ? <BellRing className="w-4 h-4 text-green-400" /> : <BellOff className="w-4 h-4 text-muted-foreground" />}
+            Push to this device
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {status.subscribed
+              ? "You'll get injury alerts, breaking news, and trade updates based on your settings above."
+              : "Enable to receive real-time alerts even when the app is closed."}
+          </p>
+          {message && <p className="text-xs text-yellow-400 mt-1">{message}</p>}
+        </div>
+        <div className="flex flex-col gap-2 flex-shrink-0">
+          {status.subscribed ? (
+            <>
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true); setMessage(null);
+                  const res = await sendTestPush();
+                  if ("error" in res) setMessage(res.error);
+                  else setMessage(`Sent to ${res.sent} device(s)`);
+                  setBusy(false);
+                }}
+                className="text-xs px-3 py-1.5 rounded-lg bg-muted hover:bg-muted/80"
+              >
+                Send test
+              </button>
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true); setMessage(null);
+                  await disablePushNotifications();
+                  await refresh();
+                  setBusy(false);
+                }}
+                className="text-xs px-3 py-1.5 rounded-lg border border-border hover:border-foreground/40"
+              >
+                Disable
+              </button>
+            </>
+          ) : (
+            <button
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true); setMessage(null);
+                const res = await enablePushNotifications();
+                if (!res.ok) setMessage(res.reason);
+                await refresh();
+                setBusy(false);
+              }}
+              className="btn-primary text-xs px-3 py-1.5"
+            >
+              Enable
+            </button>
           )}
         </div>
       </div>

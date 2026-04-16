@@ -4,6 +4,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { startLiveScoresWorker } from "./workers/liveScoresWorker";
+import { startNewsAlertsWorker } from "./workers/newsAlertsWorker";
 import { bettingService } from "./bettingService";
 
 const app = express();
@@ -99,6 +100,7 @@ app.use((req, res, next) => {
     // settlement so pending bets don't wait for user interaction to resolve.
     if (process.env.DISABLE_WORKERS !== "true") {
       startLiveScoresWorker();
+      startNewsAlertsWorker();
       setInterval(() => {
         try {
           const n = bettingService.settleDueBetsForAllUsers();

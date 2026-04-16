@@ -12,6 +12,7 @@ import { leaguesService } from "./leaguesService";
 import { espnSportsData } from "./espnSportsData";
 import { attachUser, requireUser, requireSelf } from "./auth";
 import { sseHandler, broadcast } from "./sse";
+import { pushService } from "./pushService";
 import { sportIdSchema, type SportId } from "@shared/schema";
 
 /** Parse and clamp a query-string integer to [min, max]; returns fallback for NaN. */
@@ -953,6 +954,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(prefs);
     } catch (error) {
       res.status(500).json({ error: "Failed to reset preferences" });
+    }
+  });
+
+  // ==================== PUSH NOTIFICATIONS ====================
+
+  app.get("/api/push/public-key", (_req, res) => {
+    res.json({
+      publicKey: pushService.publicKey || null,
+      configured: pushService.isConfigured,
+    });
+  });
+
+  app.post("/api/push/subscribe", requireUser, (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const endpoint = typeof body.endpoint === "string" ? body.endpoint : "";
+      const keys = body.keys && typeof body.keys === "object" ? body.keys : {};
+      const p256dh = typeof keys.p256dh === "string" ? keys.p256dh : "";
+      const auth = typeof keys.auth === "string" ? keys.auth : "";
+      if (!endpoint || !p256dh || !auth) {
+        return res.status(400).json({ error: "endpoint + keys.{p256dh,auth} required" });
+      }
+      if (endpoint.length > 2048 || p256dh.length > 256 || auth.length > 256) {
+        return res.status(400).json({ error: "subscription values too large" });
+      }
+      const sub = pushService.subscribe(req.userId!, { endpoint, keys: { p256dh, auth } });
+      res.json({ ok: true, endpoint: sub.endpoint });
+    } catch (err) {
+      console.error("Error subscribing to push:", err);
+      res.status(500).json({ error: "Failed to subscribe" });
+    }
+  });
+
+  app.post("/api/push/unsubscribe", requireUser, (req, res) => {
+    try {
+      const endpoint = typeof req.body?.endpoint === "string" ? req.body.endpoint : "";
+      if (!endpoint) return res.status(400).json({ error: "endpoint required" });
+      pushService.unsubscribe(endpoint);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to unsubscribe" });
+    }
+  });
+
+  app.post("/api/push/test", requireUser, async (req, res) => {
+    try {
+      const sent = await pushService.sendToUser(req.userId!, {
+        title: "Adams Sports News",
+        body: "Test notification — you're all set.",
+        url: "/",
+        category: "breaking",
+      });
+      res.json({ sent });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to send test push" });
     }
   });
 
