@@ -10,6 +10,7 @@ import { analystService } from "./analystService";
 import { userPreferencesService } from "./userPreferencesService";
 import { espnSportsData } from "./espnSportsData";
 import { attachUser, requireUser, requireSelf } from "./auth";
+import { sseHandler, broadcast } from "./sse";
 import { sportIdSchema, type SportId } from "@shared/schema";
 
 /** Parse and clamp a query-string integer to [min, max]; returns fallback for NaN. */
@@ -111,6 +112,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to fetch scoreboard" });
     }
   });
+
+  // Long-lived Server-Sent Events stream. Clients subscribe with
+  //   new EventSource('/api/stream?topic=scores:basketball,news:injury')
+  // and receive `score` / `news` / `bet` events as they happen. No auth
+  // required — all content is non-sensitive. Per-user-only topics
+  // (future) should be gated separately.
+  app.get("/api/stream", (req, res) => sseHandler(req, res));
 
   app.post("/api/scores/clear-cache", requireUser, async (_req, res) => {
     try {

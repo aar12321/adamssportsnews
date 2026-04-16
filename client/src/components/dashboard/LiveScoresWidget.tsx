@@ -1,8 +1,9 @@
 import React, { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Clock, ChevronRight, Wifi, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/lib/queryClient";
+import { useLiveStream } from "@/hooks/useLiveStream";
 import type { SportId } from "@shared/schema";
 
 const SPORT_LABELS: Record<string, string> = {
@@ -101,6 +102,7 @@ interface LiveScoresWidgetProps {
 
 export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
   const [selectedSport, setSelectedSport] = useState<string>("all");
+  const queryClient = useQueryClient();
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["/api/scores", selectedSport],
@@ -108,9 +110,42 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
       const url = selectedSport === "all" ? "/api/scores" : `/api/scores?sport=${selectedSport}`;
       return fetchJson<{ scores: Score[] }>(url);
     },
-    refetchInterval: 60000, // Auto-refresh every minute
+    // Server pushes score updates via SSE, so we poll every 2 min just as
+    // a safety net in case the stream drops silently on a mobile network.
+    refetchInterval: 120_000,
     // Keep prior scores visible while we re-fetch instead of flashing the empty state.
     placeholderData: (prev) => prev,
+  });
+
+  // Subscribe to live score updates via Server-Sent Events. Updates the
+  // React Query cache in-place so the UI re-renders without a fetch.
+  const topic = selectedSport === "all" ? "scores:all" : `scores:${selectedSport}`;
+  useLiveStream([topic], {
+    score: (incoming: Score) => {
+      queryClient.setQueryData<{ scores: Score[] } | undefined>(
+        ["/api/scores", selectedSport],
+        (prev) => {
+          const list = prev?.scores ? [...prev.scores] : [];
+          const idx = list.findIndex((s) => s.id === incoming.id);
+          if (idx >= 0) list[idx] = incoming; else list.push(incoming);
+          return { ...(prev || {}), scores: list };
+        },
+      );
+    },
+    "score-finished": (finished: Score) => {
+      queryClient.setQueryData<{ scores: Score[] } | undefined>(
+        ["/api/scores", selectedSport],
+        (prev) => {
+          if (!prev?.scores) return prev;
+          return {
+            ...prev,
+            scores: prev.scores.map((s) =>
+              s.id === finished.id ? { ...s, status: "finished" } : s,
+            ),
+          };
+        },
+      );
+    },
   });
 
   const scores: Score[] = data?.scores || [];
