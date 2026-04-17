@@ -13,6 +13,7 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchJson } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRealtimeTable } from "@/hooks/useRealtimeTable";
 import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 const SPORT_GAMES: Record<string, { home: string; away: string; league: string }[]> = {
   basketball: [
@@ -816,8 +817,21 @@ export default function BettingApp() {
   const { data: bets } = useQuery({
     queryKey: ["betting-bets", userId],
     queryFn: () => fetchJson<any[]>(`/api/betting/bets/${userId}`),
-    refetchInterval: 30000,
-    staleTime: 25000,
+    refetchInterval: 60000,
+    staleTime: 50000,
+  });
+
+  // When a bet settles in the background (60s sweep), Realtime pushes the
+  // UPDATE and we invalidate the cache so the UI shows "Won/Lost" instantly
+  // without waiting for the next poll cycle.
+  useRealtimeTable("sports_bets", {
+    filter: `user_id=eq.${userId}`,
+    enabled: !!userId,
+    onUpdate: () => {
+      qc.invalidateQueries({ queryKey: ["betting-bets", userId] });
+      qc.invalidateQueries({ queryKey: ["betting-account", userId] });
+    },
+    onInsert: () => qc.invalidateQueries({ queryKey: ["betting-bets", userId] }),
   });
 
   const { data: trending } = useQuery({

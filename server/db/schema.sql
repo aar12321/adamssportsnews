@@ -157,6 +157,28 @@ create table if not exists public.sports_sent_notifications (
 create index if not exists sports_sent_notifications_time_idx on public.sports_sent_notifications (sent_at);
 
 -- =============================================================================
+-- Realtime
+--
+-- These tables broadcast INSERT/UPDATE/DELETE to any Supabase client that
+-- subscribes via supabase.channel().on('postgres_changes', ...). The client
+-- hook useRealtimeTable.ts wraps this.
+-- =============================================================================
+
+-- Safe to re-run: Postgres ignores duplicate entries in the publication.
+do $$ begin
+  alter publication supabase_realtime add table public.sports_fantasy_matchups;
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.sports_fantasy_league_members;
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.sports_fantasy_rosters;
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.sports_bets;
+exception when duplicate_object then null; end $$;
+
+-- =============================================================================
 -- Row-Level Security
 --
 -- Supabase's auth.uid() returns uuid. Our user_id columns are text. Explicit

@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { apiRequest, fetchJson } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useRealtimeTable } from "@/hooks/useRealtimeTable";
 import type { SportId } from "@shared/schema";
 
 // -----------------------------------------------------------------------------
@@ -353,6 +354,27 @@ function LeagueDetail({
         week ? `/api/leagues/${leagueId}/matchups?week=${week}` : `/api/leagues/${leagueId}/matchups`,
       ),
     enabled: !!league,
+  });
+
+  // --- Supabase Realtime: auto-refresh standings + matchups when another
+  // user's data changes (e.g. a league owner settles a week from a
+  // different browser tab, or another member adds a player to their
+  // roster changing the projected scores). No polling needed.
+  useRealtimeTable("sports_fantasy_matchups", {
+    filter: `league_id=eq.${leagueId}`,
+    onInsert: () => queryClient.invalidateQueries({ queryKey: ["/api/leagues", leagueId, "matchups"] }),
+    onUpdate: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/leagues", leagueId, "matchups"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/leagues", leagueId, "standings"] });
+    },
+  });
+  useRealtimeTable("sports_fantasy_league_members", {
+    filter: `league_id=eq.${leagueId}`,
+    onInsert: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/leagues", leagueId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/leagues", leagueId, "standings"] });
+    },
+    onUpdate: () => queryClient.invalidateQueries({ queryKey: ["/api/leagues", leagueId, "standings"] }),
   });
 
   const scheduleMut = useMutation({
