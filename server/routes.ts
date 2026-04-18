@@ -274,7 +274,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (typeof body.betType !== "string" || !body.betType) {
         return res.status(400).json({ error: "betType is required" });
       }
-      const result = bettingService.placeBet(req.params.userId, { ...body, amount, odds });
+      // winProbability drives settlement — without a valid value every bet
+      // would silently settle as a loss (roll < undefined === false). Clamp
+      // into a sane range so tampered clients can't guarantee wins either.
+      const rawWinProb = Number(body.winProbability);
+      if (!Number.isFinite(rawWinProb)) {
+        return res.status(400).json({ error: "winProbability must be a number between 0 and 1" });
+      }
+      const winProbability = Math.min(0.99, Math.max(0.01, rawWinProb));
+      const result = bettingService.placeBet(req.params.userId, {
+        ...body,
+        amount,
+        odds,
+        winProbability,
+      });
       if ("error" in result) {
         return res.status(400).json(result);
       }
