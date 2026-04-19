@@ -114,16 +114,14 @@ export class NewsService {
       const allArticles: NewsArticle[] = [];
       
       results.forEach((result, index) => {
+        const api = availableApis[index];
         if (result.status === "fulfilled" && result.value.length > 0) {
           allArticles.push(...result.value);
-          // Record success
-          apiManager.recordSuccess(availableApis[index]);
+          apiManager.recordSuccess(api);
         } else if (result.status === "rejected") {
-          // Record failure
-          apiManager.recordFailure(
-            availableApis[index],
-            result.reason?.message || "Unknown error"
-          );
+          const reason = result.reason?.message || "Unknown error";
+          console.warn(`[news] ${api} feed rejected: ${reason}`);
+          apiManager.recordFailure(api, reason);
         }
       });
 

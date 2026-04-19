@@ -59,8 +59,16 @@ export class ScoresService {
 
       const allScores: Score[] = [];
 
-      if (espnScores.status === "fulfilled") allScores.push(...espnScores.value);
-      if (sportsDbScores.status === "fulfilled") allScores.push(...sportsDbScores.value);
+      if (espnScores.status === "fulfilled") {
+        allScores.push(...espnScores.value);
+      } else {
+        console.warn("[scores] ESPN feed rejected:", espnScores.reason?.message || espnScores.reason);
+      }
+      if (sportsDbScores.status === "fulfilled") {
+        allScores.push(...sportsDbScores.value);
+      } else {
+        console.warn("[scores] TheSportsDB feed rejected:", sportsDbScores.reason?.message || sportsDbScores.reason);
+      }
 
       // Remove duplicates and cache
       const uniqueScores = this.deduplicateScores(allScores);
