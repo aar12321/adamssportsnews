@@ -76,7 +76,10 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
   });
   const [isLoading, setIsLoading] = useState(false);
 
-  // Update userId when user changes
+  // Update preferences when the authenticated user changes. Critically:
+  // when `user` becomes null (sign-out), reset back to defaults so the
+  // prior user's display name, favourites, and dashboard layout don't
+  // bleed into the next sign-in or the "default" server bucket.
   useEffect(() => {
     if (user) {
       try {
@@ -90,11 +93,17 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
       } catch {
         setPreferences(prev => ({ ...prev, userId }));
       }
+    } else {
+      setPreferences({ ...defaultPreferences, userId: "default" });
     }
   }, [userId, storageKey, user]);
 
-  // Sync to server
+  // Sync to server — but only while a real user is signed in. Without
+  // this guard, the debounced PATCH kept firing after sign-out, pushing
+  // the previous user's prefs up to /api/preferences/default (and now
+  // the server would 401 that anyway because no token is attached).
   useEffect(() => {
+    if (!user) return;
     const timeout = setTimeout(async () => {
       try {
         await fetch(`/api/preferences/${userId}`, {
@@ -107,7 +116,7 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
       }
     }, 1000);
     return () => clearTimeout(timeout);
-  }, [preferences, userId]);
+  }, [preferences, userId, user]);
 
   // Persist locally
   useEffect(() => {
