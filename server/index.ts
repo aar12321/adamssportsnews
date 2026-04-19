@@ -98,5 +98,21 @@ app.use((req, res, next) => {
   }
   server.listen(listenOpts, () => {
     log(`serving on port ${port}`);
+    // Surface deployment-readiness at startup so nothing important is
+    // silently misconfigured. Keep it to a single block so it's hard to miss.
+    const warnings: string[] = [];
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+      warnings.push(
+        "SUPABASE_URL / SUPABASE_ANON_KEY not set — per-user routes run in INSECURE dev mode."
+      );
+    }
+    warnings.push(
+      "Betting bankroll, user preferences, and fantasy rosters live in server memory (or the client's localStorage) and will be wiped on every restart. Wire a real DB before shipping real money or shareable state."
+    );
+    if (warnings.length) {
+      console.warn("\n[startup] readiness notes:");
+      warnings.forEach(w => console.warn(`  - ${w}`));
+      console.warn("");
+    }
   });
 })();
