@@ -680,7 +680,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!team1 || !team2) {
         return res.status(400).json({ error: "team1 and team2 are required" });
       }
-      const h2h = analystService.getHeadToHead(team1, team2);
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const h2h = analystService.getHeadToHead(team1, team2, sport);
       res.json(h2h);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch head-to-head data" });
