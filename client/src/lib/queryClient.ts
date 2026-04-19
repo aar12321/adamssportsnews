@@ -1,5 +1,23 @@
 import { QueryClient } from "@tanstack/react-query";
 
+// AuthContext sets this whenever the Supabase session changes so that
+// every API request automatically carries the user's bearer token. Using
+// a module-level variable (rather than threading the token through every
+// queryFn) keeps all existing `fetch("/api/...")` call sites working
+// without each one having to know about auth.
+let currentAccessToken: string | null = null;
+const unauthorizedHandlers = new Set<() => void>();
+
+export function setAccessToken(token: string | null) {
+  currentAccessToken = token;
+}
+
+/** Subscribe to 401 responses (e.g. to force the user back to Login). */
+export function onUnauthorized(handler: () => void): () => void {
+  unauthorizedHandlers.add(handler);
+  return () => unauthorizedHandlers.delete(handler);
+}
+
 /**
  * Fetch JSON from an API endpoint with consistent error handling and a
  * sensible default request timeout. Throws a typed Error on any non-2xx
@@ -15,13 +33,21 @@ export async function apiRequest<T = any>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers: Record<string, string> = {};
+    if (data) headers["Content-Type"] = "application/json";
+    if (currentAccessToken) headers["Authorization"] = `Bearer ${currentAccessToken}`;
     const res = await fetch(url, {
       method,
-      headers: data ? { "Content-Type": "application/json" } : {},
+      headers,
       body: data ? JSON.stringify(data) : undefined,
       credentials: "include",
       signal: controller.signal,
     });
+    if (res.status === 401) {
+      unauthorizedHandlers.forEach(h => {
+        try { h(); } catch { /* ignore */ }
+      });
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => res.statusText);
       throw new Error(`${res.status}: ${text}`);
