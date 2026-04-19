@@ -344,6 +344,7 @@ export class AnalystService {
       team1: team1Name,
       team2: team2Name,
       sport: resolvedSport,
+      source: "mock",
       allTime: { team1Wins: t1Wins, team2Wins: t2Wins, ties },
       lastFive: {
         team1Wins: recentGames.filter(g => g.winner === team1Name).length,

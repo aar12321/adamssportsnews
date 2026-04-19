@@ -268,6 +268,8 @@ export interface HeadToHead {
   team1AvgScore: number;
   team2AvgScore: number;
   analysis: string;
+  /** "mock" when the response is synthesised, "live" when sourced from a real feed. */
+  source?: "mock" | "live";
 }
 
 // ==================== USER PREFERENCES TYPES ====================
