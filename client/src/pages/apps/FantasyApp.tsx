@@ -395,11 +395,26 @@ function TradeAnalyzer({ sportKey }: { sportKey: string }) {
     }
   };
 
+  // Tell the user when a sport switch wiped an in-progress trade, so the
+  // reset doesn't feel like the app lost their work silently. Player IDs
+  // are sport-scoped so the wipe itself is necessary.
+  const [resetNotice, setResetNotice] = useState(false);
   useEffect(() => {
+    if (givingIds.length > 0 || receivingIds.length > 0) {
+      setResetNotice(true);
+    }
     setGivingIds([]);
     setReceivingIds([]);
     setStep("giving");
+    // Depend only on sportKey — we intentionally don't want to re-run
+    // this effect as the user builds their trade.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sportKey]);
+  useEffect(() => {
+    if (!resetNotice) return;
+    const t = setTimeout(() => setResetNotice(false), 4000);
+    return () => clearTimeout(t);
+  }, [resetNotice]);
 
   return (
     <div className="glass-card p-5 space-y-4">
@@ -407,6 +422,13 @@ function TradeAnalyzer({ sportKey }: { sportKey: string }) {
         <ArrowLeftRight className="w-4 h-4 text-purple-400" />
         Trade Analyzer
       </h3>
+
+      {resetNotice && (
+        <div className="flex items-start gap-2 p-2.5 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-xs text-yellow-400">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          <span>Switched sport — previous trade selections were cleared.</span>
+        </div>
+      )}
 
       {step !== "result" ? (
         <>
