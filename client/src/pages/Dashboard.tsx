@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import LiveScoresWidget from "@/components/dashboard/LiveScoresWidget";
 import NewsFeed from "@/components/dashboard/NewsFeed";
 import AppSummaries from "@/components/dashboard/AppSummaries";
+import NextGameCard from "@/components/dashboard/NextGameCard";
 
 type DashboardTabKey = "scores" | "news" | "apps";
 
@@ -74,6 +75,14 @@ export default function Dashboard() {
             <span className="text-xs font-medium text-green-400">Live</span>
           </div>
         </div>
+      </div>
+
+      {/* Daily briefing — one glance at what matters today for this user. */}
+      <div className="mb-5">
+        <NextGameCard
+          favoriteTeams={preferences.favoriteTeams}
+          displayName={preferences.displayName}
+        />
       </div>
 
       {!anyWidgetEnabled ? (
