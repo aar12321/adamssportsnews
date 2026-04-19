@@ -161,6 +161,17 @@ function ComparisonView({ sport }: { sport: string }) {
   const [selectedTeam2, setSelectedTeam2] = useState<string | null>(null);
   const [mode, setMode] = useState<"teams" | "players">("teams");
 
+  // Teams and players are sport-scoped; if the user changes the top-level
+  // sport we can't carry stale selections over or the compare request will
+  // ask for (e.g.) NBA teams under sport=football and come back empty.
+  useEffect(() => {
+    setTeam1Query("");
+    setTeam2Query("");
+    setSelectedTeam1(null);
+    setSelectedTeam2(null);
+    setMode("teams");
+  }, [sport]);
+
   const { data: teams } = useQuery({
     queryKey: ["/api/analyst/teams", sport],
     queryFn: async () => {
@@ -170,7 +181,9 @@ function ComparisonView({ sport }: { sport: string }) {
   });
 
   const { data: comparison, isLoading } = useQuery({
-    queryKey: ["/api/analyst/teams/compare", selectedTeam1, selectedTeam2],
+    // sport must be part of the key so "Boston Celtics vs Dallas Cowboys"
+    // under basketball and football aren't served from the same cache entry.
+    queryKey: ["/api/analyst/teams/compare", sport, selectedTeam1, selectedTeam2],
     queryFn: async () => {
       if (!selectedTeam1 || !selectedTeam2) return null;
       const res = await fetch("/api/analyst/teams/compare", {
