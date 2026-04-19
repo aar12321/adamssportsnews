@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import type { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { setAccessToken } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
 
 interface AuthContextValue {
   user: User | null;
@@ -54,6 +55,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!perUserDone && !legacyDone) {
           setIsNewUser(true);
         }
+      }
+
+      // Any time the session goes away (explicit sign-out, token
+      // expiry, session revoked in Supabase dashboard) wipe the query
+      // cache so cached rows from the previous user never flash into
+      // the next user's UI.
+      if (event === "SIGNED_OUT" || !newSession) {
+        queryClient.clear();
       }
     });
 
@@ -177,6 +186,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setSession(null);
     setIsNewUser(false);
+    // Drop every cached query so the next account that signs in doesn't
+    // momentarily see the previous user's bets, preferences, or roster.
+    queryClient.clear();
   }, []);
 
   return (
