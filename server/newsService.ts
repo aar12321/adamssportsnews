@@ -604,7 +604,33 @@ export class NewsService {
       return "soccer";
     }
 
-    return "basketball"; // Default
+    if (
+      lowerText.includes("mlb") ||
+      lowerText.includes("baseball") ||
+      lowerText.includes("yankees") ||
+      lowerText.includes("dodgers") ||
+      lowerText.includes("red sox") ||
+      lowerText.includes("home run")
+    ) {
+      return "baseball";
+    }
+
+    if (
+      lowerText.includes("nhl") ||
+      lowerText.includes("hockey") ||
+      lowerText.includes("bruins") ||
+      lowerText.includes("rangers") ||
+      lowerText.includes("maple leafs") ||
+      lowerText.includes("stanley cup")
+    ) {
+      return "hockey";
+    }
+
+    // Nothing matched: keep the historical basketball default so callers
+    // that expect a concrete SportId don't break, but note that this is
+    // the last-resort bucket — any article landing here should be treated
+    // as unclassified rather than confidently basketball.
+    return "basketball";
   }
 
   /**
