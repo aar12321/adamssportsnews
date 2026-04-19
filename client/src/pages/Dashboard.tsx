@@ -8,6 +8,7 @@ import LiveScoresWidget from "@/components/dashboard/LiveScoresWidget";
 import NewsFeed from "@/components/dashboard/NewsFeed";
 import AppSummaries from "@/components/dashboard/AppSummaries";
 import NextGameCard from "@/components/dashboard/NextGameCard";
+import InjuryAlertsCard from "@/components/dashboard/InjuryAlertsCard";
 
 type DashboardTabKey = "scores" | "news" | "apps";
 
@@ -78,10 +79,14 @@ export default function Dashboard() {
       </div>
 
       {/* Daily briefing — one glance at what matters today for this user. */}
-      <div className="mb-5">
+      <div className="mb-5 space-y-3">
         <NextGameCard
           favoriteTeams={preferences.favoriteTeams}
           displayName={preferences.displayName}
+        />
+        <InjuryAlertsCard
+          favoriteTeams={preferences.favoriteTeams}
+          favoritePlayers={preferences.favoritePlayers}
         />
       </div>
 
