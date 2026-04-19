@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   User, Palette, Bell, LayoutDashboard, Trophy, Target, Smartphone,
   Monitor, Sun, Moon, ChevronRight, Check, Save, RotateCcw,
   Shield, Activity, AlertCircle, DollarSign, Users, BarChart3, LogOut, Mail,
   Plus, X
 } from "lucide-react";
+import { Link } from "wouter";
 import { cn } from "@/lib/utils";
 import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -130,6 +131,26 @@ export default function Profile() {
       favoriteTeams: preferences.favoriteTeams.filter(t => t !== team),
     });
   };
+
+  // Quick peek at the user's fantasy rosters without leaving Profile.
+  // Rosters are stored by FantasyApp in localStorage under a per-user
+  // key; we only read, never write, so this can't desync state.
+  const rosterSummary = useMemo(() => {
+    const uid = user?.id;
+    if (!uid) return [] as { sport: string; count: number }[];
+    try {
+      const raw = localStorage.getItem(`fantasy_rosters_v2_${uid}`);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return [];
+      return Object.entries(parsed)
+        .filter(([, players]) => Array.isArray(players) && players.length > 0)
+        .map(([sport, players]) => ({ sport, count: (players as unknown[]).length }))
+        .sort((a, b) => b.count - a.count);
+    } catch {
+      return [];
+    }
+  }, [user?.id]);
 
   const toggleFavoriteSport = (sport: string) => {
     const current = preferences.favoriteSports;
@@ -301,6 +322,29 @@ export default function Profile() {
                       Add
                     </button>
                   </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">My Fantasy Rosters</label>
+                  {rosterSummary.length === 0 ? (
+                    <Link href="/apps/fantasy">
+                      <a className="block p-3 bg-muted/30 border border-dashed border-border rounded-xl text-xs text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all">
+                        You haven&apos;t built a roster yet. <span className="text-primary font-semibold">Open Fantasy →</span>
+                      </a>
+                    </Link>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {rosterSummary.map(({ sport, count }) => (
+                        <Link key={sport} href="/apps/fantasy">
+                          <a className="block p-3 bg-muted/30 hover:bg-muted border border-border rounded-xl transition-all">
+                            <p className="text-xs text-muted-foreground capitalize">{sport}</p>
+                            <p className="text-lg font-bold text-foreground num">
+                              {count} <span className="text-xs font-normal text-muted-foreground">player{count === 1 ? "" : "s"}</span>
+                            </p>
+                          </a>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="p-4 bg-muted/30 rounded-xl">
                   <div className="flex items-center gap-2 mb-2">
