@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Search, Filter, Zap, AlertTriangle, ArrowLeftRight, MessageCircle, Newspaper, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/lib/queryClient";
+import type { SportId } from "@shared/schema";
 import NewsCard, { type NewsCategory } from "./NewsCard";
 
 const CATEGORIES: { key: NewsCategory; label: string; Icon: any }[] = [
@@ -38,16 +39,33 @@ function deduplicateNews(articles: any[]): any[] {
 interface NewsFeedProps {
   categories: string[];
   count: number;
+  /** Sports the user follows. When provided, the feed only loads those sports. */
+  sports?: SportId[];
 }
 
-export default function NewsFeed({ categories, count }: NewsFeedProps) {
+export default function NewsFeed({ categories, count, sports }: NewsFeedProps) {
   const [activeCategory, setActiveCategory] = useState<NewsCategory | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
+  const [activeSport, setActiveSport] = useState<SportId | "all">("all");
+
+  // If the user changes their favourite sports in Profile, drop a stale
+  // sport-chip selection so the feed can't silently exclude everything.
+  useEffect(() => {
+    if (activeSport !== "all" && sports && !sports.includes(activeSport)) {
+      setActiveSport("all");
+    }
+  }, [sports, activeSport]);
+
+  const sportQuery = activeSport !== "all" ? activeSport : undefined;
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
-    queryKey: ["/api/news"],
-    queryFn: async () => fetchJson<{ articles: any[] }>("/api/news?limit=80"),
+    // Include the active sport so different chips don't collide in cache.
+    queryKey: ["/api/news", sportQuery ?? "all"],
+    queryFn: async () => {
+      const suffix = sportQuery ? `&sport=${encodeURIComponent(sportQuery)}` : "";
+      return fetchJson<{ articles: any[] }>(`/api/news?limit=80${suffix}`);
+    },
     refetchInterval: 5 * 60 * 1000, // 5 min
     placeholderData: (prev) => prev,
   });
@@ -131,6 +149,37 @@ export default function NewsFeed({ categories, count }: NewsFeedProps) {
           className="input-field animate-fade-in"
           autoFocus
         />
+      )}
+
+      {/* Sport chips (only when the user has favourites) */}
+      {sports && sports.length > 1 && (
+        <div className="scroll-row">
+          <button
+            onClick={() => setActiveSport("all")}
+            className={cn(
+              "flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all",
+              activeSport === "all"
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-muted border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            All sports
+          </button>
+          {sports.map((s) => (
+            <button
+              key={s}
+              onClick={() => setActiveSport(s)}
+              className={cn(
+                "flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all capitalize",
+                activeSport === s
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-muted border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
       )}
 
       {/* Category filters */}

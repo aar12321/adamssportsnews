@@ -97,7 +97,7 @@ export default function Dashboard() {
             </div>
           )}
           {activeTab === "scores" && showLiveScores && <LiveScoresWidget sports={dashboardLayout.scoresSports} />}
-          {activeTab === "news" && showNewsFeed && <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} />}
+          {activeTab === "news" && showNewsFeed && <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} sports={preferences.favoriteSports} />}
           {activeTab === "apps" && showAppSummaries && <AppSummaries />}
         </div>
       ) : (
@@ -123,7 +123,7 @@ export default function Dashboard() {
                 <div className={cn(
                   showLiveScores ? "col-span-7 xl:col-span-8" : "col-span-12"
                 )}>
-                  <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} />
+                  <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} sports={preferences.favoriteSports} />
                 </div>
               )}
             </div>
