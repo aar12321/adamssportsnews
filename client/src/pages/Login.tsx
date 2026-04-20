@@ -31,6 +31,20 @@ export default function Login() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  const switchMode = (next: "login" | "signup") => {
+    if (next === mode) return;
+    setMode(next);
+    setError(null);
+    setSuccess(null);
+    // Hide the password when switching tabs so a previously revealed
+    // login password isn't left visible while the user types into the
+    // signup form (or vice versa).
+    setShowPassword(false);
+    // Don't preserve half-typed credentials across the mode switch.
+    setPassword("");
+    setConfirmPassword("");
+  };
+
   // Surface OAuth callback errors. Supabase appends ?error=... &
   // error_description=... to the redirect URL when OAuth fails (e.g.,
   // user denied consent, account-linking conflict, provider not enabled).
@@ -97,8 +111,11 @@ export default function Login() {
     if (signUpError) {
       setError(signUpError);
     } else {
-      setSuccess("Account created! Check your email to confirm, then sign in.");
       setMode("login");
+      setPassword("");
+      setConfirmPassword("");
+      setShowPassword(false);
+      setSuccess("Account created! Check your email to confirm, then sign in.");
     }
     setLoading(false);
   };
@@ -122,7 +139,7 @@ export default function Login() {
           {/* Mode tabs */}
           <div className="flex mb-6 bg-muted rounded-xl p-1">
             <button
-              onClick={() => { setMode("login"); setError(null); setSuccess(null); }}
+              onClick={() => switchMode("login")}
               className={cn(
                 "flex-1 py-2 rounded-lg text-sm font-medium transition-all",
                 mode === "login"
@@ -133,7 +150,7 @@ export default function Login() {
               Sign In
             </button>
             <button
-              onClick={() => { setMode("signup"); setError(null); setSuccess(null); }}
+              onClick={() => switchMode("signup")}
               className={cn(
                 "flex-1 py-2 rounded-lg text-sm font-medium transition-all",
                 mode === "signup"

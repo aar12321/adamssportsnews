@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import type { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { setAccessToken } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
 
 interface AuthContextValue {
   user: User | null;
@@ -21,11 +23,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [isNewUser, setIsNewUser] = useState(false);
+  // Keep the latest token in a ref so the window.fetch wrapper (installed
+  // once below) always sees the current value without reinstalling.
+  const tokenRef = useRef<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
+      tokenRef.current = currentSession?.access_token ?? null;
+      setAccessToken(tokenRef.current);
       setLoading(false);
     });
 
@@ -34,6 +41,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
+      tokenRef.current = newSession?.access_token ?? null;
+      setAccessToken(tokenRef.current);
       setLoading(false);
 
       // SIGNED_IN fires after the OAuth callback completes. If this is
@@ -47,12 +56,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsNewUser(true);
         }
       }
+
+      // Any time the session goes away (explicit sign-out, token
+      // expiry, session revoked in Supabase dashboard) wipe the query
+      // cache so cached rows from the previous user never flash into
+      // the next user's UI.
+      if (event === "SIGNED_OUT" || !newSession) {
+        queryClient.clear();
+      }
     });
 
     return () => {
       subscription.unsubscribe();
     };
   }, []);
+
+  // Wrap window.fetch so every same-origin /api/* request carries the
+  // Supabase access token. This means existing bare fetch("/api/...")
+  // call sites automatically authenticate without individual refactors.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const token = tokenRef.current;
+      const urlString = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      // Only attach for same-origin /api/* paths — we never want to leak
+      // the user's token to a third-party URL.
+      const isApi = urlString.startsWith("/api/") ||
+        urlString.startsWith(`${window.location.origin}/api/`);
+      let response: Response;
+      if (token && isApi) {
+        const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
+        if (!headers.has("Authorization")) {
+          headers.set("Authorization", `Bearer ${token}`);
+        }
+        response = await originalFetch(input, { ...init, headers });
+      } else {
+        response = await originalFetch(input, init);
+      }
+      // A 401 on a same-origin API call means the session is no longer
+      // valid on the server. Sign out so AuthGate kicks the user back
+      // to Login instead of leaving them on a broken page.
+      if (isApi && response.status === 401) {
+        supabase.auth.signOut().catch(() => { /* ignore */ });
+      }
+      return response;
+    };
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
+
 
   const signIn = useCallback(async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -128,6 +186,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setSession(null);
     setIsNewUser(false);
+    // Drop every cached query so the next account that signs in doesn't
+    // momentarily see the previous user's bets, preferences, or roster.
+    queryClient.clear();
   }, []);
 
   return (

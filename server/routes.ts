@@ -10,6 +10,7 @@ import { analystService } from "./analystService";
 import { userPreferencesService } from "./userPreferencesService";
 import { espnSportsData } from "./espnSportsData";
 import { sportIdSchema, type SportId } from "@shared/schema";
+import { requireSelf } from "./auth";
 
 /** Parse and clamp a query-string integer to [min, max]; returns fallback for NaN. */
 function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
@@ -231,7 +232,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/betting/account/:userId", (req, res) => {
+  app.get("/api/betting/account/:userId", requireSelf, (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
@@ -243,7 +244,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/betting/bets/:userId", (req, res) => {
+  app.get("/api/betting/bets/:userId", requireSelf, (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
@@ -255,7 +256,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/betting/bets/:userId", (req, res) => {
+  app.post("/api/betting/bets/:userId", requireSelf, (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
@@ -274,7 +275,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (typeof body.betType !== "string" || !body.betType) {
         return res.status(400).json({ error: "betType is required" });
       }
-      const result = bettingService.placeBet(req.params.userId, { ...body, amount, odds });
+      // winProbability drives settlement — without a valid value every bet
+      // would silently settle as a loss (roll < undefined === false). Clamp
+      // into a sane range so tampered clients can't guarantee wins either.
+      const rawWinProb = Number(body.winProbability);
+      if (!Number.isFinite(rawWinProb)) {
+        return res.status(400).json({ error: "winProbability must be a number between 0 and 1" });
+      }
+      const winProbability = Math.min(0.99, Math.max(0.01, rawWinProb));
+      const result = bettingService.placeBet(req.params.userId, {
+        ...body,
+        amount,
+        odds,
+        winProbability,
+      });
       if ("error" in result) {
         return res.status(400).json(result);
       }
@@ -285,7 +299,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/betting/bets/:userId/:betId", (req, res) => {
+  app.delete("/api/betting/bets/:userId/:betId", requireSelf, (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
@@ -300,7 +314,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/betting/account/:userId/reset", (req, res) => {
+  app.post("/api/betting/account/:userId/reset", requireSelf, (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
@@ -667,7 +681,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!team1 || !team2) {
         return res.status(400).json({ error: "team1 and team2 are required" });
       }
-      const h2h = analystService.getHeadToHead(team1, team2);
+      const { sport, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const h2h = analystService.getHeadToHead(team1, team2, sport);
       res.json(h2h);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch head-to-head data" });
@@ -702,7 +718,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ==================== USER PREFERENCES ====================
 
-  app.get("/api/preferences/:userId", (req, res) => {
+  app.get("/api/preferences/:userId", requireSelf, (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
@@ -714,7 +730,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/preferences/:userId", (req, res) => {
+  app.patch("/api/preferences/:userId", requireSelf, (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });
@@ -726,7 +742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/preferences/:userId/reset", (req, res) => {
+  app.post("/api/preferences/:userId/reset", requireSelf, (req, res) => {
     try {
       if (!isValidUserId(req.params.userId)) {
         return res.status(400).json({ error: "Invalid userId" });

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Trophy, ChevronRight, ChevronLeft, Check, Target, BarChart3,
   Users, Zap, Search, X, Settings
@@ -110,6 +110,18 @@ export default function Onboarding() {
       .slice(0, 20);
   }, [teamSearch, searchableTeams]);
 
+  // If the user removes a sport after picking teams from it, drop those
+  // teams so they don't end up saving favorites for a sport they no longer
+  // follow. Uses a Set of valid team names derived from current sports.
+  useEffect(() => {
+    setSelectedTeams(prev => {
+      const valid = new Set<string>();
+      selectedSports.forEach(s => (ALL_TEAMS[s] || []).forEach(t => valid.add(t)));
+      const next = prev.filter(t => valid.has(t));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [selectedSports]);
+
   const toggleSport = (sport: SportId) => {
     setSelectedSports(prev =>
       prev.includes(sport) ? prev.filter(s => s !== sport) : [...prev, sport]
@@ -176,6 +188,19 @@ export default function Onboarding() {
   };
 
   const handleSkip = () => {
+    // Skip still persists whatever the user has already entered in earlier
+    // steps, so their display name and any picked sports/teams/interests
+    // aren't silently discarded when they bail partway through setup.
+    const name = displayName.trim();
+    bulkUpdate(prev => ({
+      ...prev,
+      ...(name ? { displayName: name } : {}),
+      ...(selectedSports.length > 0 ? { favoriteSports: selectedSports } : {}),
+      ...(selectedTeams.length > 0 ? { favoriteTeams: selectedTeams } : {}),
+      ...(selectedSports.length > 0
+        ? { dashboardLayout: { ...prev.dashboardLayout, scoresSports: selectedSports } }
+        : {}),
+    }));
     try {
       localStorage.setItem(`onboarding_complete_${user?.id || "default"}`, "true");
       localStorage.setItem("onboarding_complete", "true");

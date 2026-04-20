@@ -114,16 +114,14 @@ export class NewsService {
       const allArticles: NewsArticle[] = [];
       
       results.forEach((result, index) => {
+        const api = availableApis[index];
         if (result.status === "fulfilled" && result.value.length > 0) {
           allArticles.push(...result.value);
-          // Record success
-          apiManager.recordSuccess(availableApis[index]);
+          apiManager.recordSuccess(api);
         } else if (result.status === "rejected") {
-          // Record failure
-          apiManager.recordFailure(
-            availableApis[index],
-            result.reason?.message || "Unknown error"
-          );
+          const reason = result.reason?.message || "Unknown error";
+          console.warn(`[news] ${api} feed rejected: ${reason}`);
+          apiManager.recordFailure(api, reason);
         }
       });
 
@@ -604,7 +602,33 @@ export class NewsService {
       return "soccer";
     }
 
-    return "basketball"; // Default
+    if (
+      lowerText.includes("mlb") ||
+      lowerText.includes("baseball") ||
+      lowerText.includes("yankees") ||
+      lowerText.includes("dodgers") ||
+      lowerText.includes("red sox") ||
+      lowerText.includes("home run")
+    ) {
+      return "baseball";
+    }
+
+    if (
+      lowerText.includes("nhl") ||
+      lowerText.includes("hockey") ||
+      lowerText.includes("bruins") ||
+      lowerText.includes("rangers") ||
+      lowerText.includes("maple leafs") ||
+      lowerText.includes("stanley cup")
+    ) {
+      return "hockey";
+    }
+
+    // Nothing matched: keep the historical basketball default so callers
+    // that expect a concrete SportId don't break, but note that this is
+    // the last-resort bucket — any article landing here should be treated
+    // as unclassified rather than confidently basketball.
+    return "basketball";
   }
 
   /**

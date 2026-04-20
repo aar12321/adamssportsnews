@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Clock, ChevronRight, Wifi, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -102,6 +102,18 @@ interface LiveScoresWidgetProps {
 export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
   const [selectedSport, setSelectedSport] = useState<string>("all");
 
+  const displaySports = ["all", ...sports];
+
+  // If the user removes the currently-selected sport from their favourites
+  // in Profile, the chip vanishes from displaySports but selectedSport stays
+  // set — leaving an invisible filter on the scores feed. Snap back to "all"
+  // so the UI always reflects the actually-applied filter.
+  useEffect(() => {
+    if (!displaySports.includes(selectedSport)) {
+      setSelectedSport("all");
+    }
+  }, [displaySports, selectedSport]);
+
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["/api/scores", selectedSport],
     queryFn: async () => {
@@ -115,8 +127,6 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
 
   const scores: Score[] = data?.scores || [];
   const liveCount = scores.filter(s => s.status === "live").length;
-
-  const displaySports = ["all", ...sports];
 
   return (
     <div className="space-y-4">

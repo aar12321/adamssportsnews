@@ -447,9 +447,27 @@ function AccountCard({ account, onReset, isResetting }: { account: any; onReset:
       <div className="mb-4">
         <p className="text-xs text-muted-foreground mb-1">Balance</p>
         <p className="text-3xl font-bold text-foreground num">${(account?.balance || 10000).toLocaleString("en-US", { minimumFractionDigits: 2 })}</p>
-        <p className={cn("text-sm font-semibold num mt-1", isUp ? "text-green-400" : "text-red-400")}>
-          {isUp ? "+" : ""}{profit.toFixed(2)} ({account?.roi?.toFixed(1) || "0.0"}% ROI)
-        </p>
+        <div className="flex items-center gap-2 mt-1 flex-wrap">
+          <p className={cn("text-sm font-semibold num", isUp ? "text-green-400" : "text-red-400")}>
+            {isUp ? "+" : ""}{profit.toFixed(2)} ({account?.roi?.toFixed(1) || "0.0"}% ROI)
+          </p>
+          {(() => {
+            const streak = Number(account?.currentStreak) || 0;
+            if (streak === 0) return null;
+            const isHot = streak > 0;
+            return (
+              <span className={cn(
+                "px-2 py-0.5 rounded-full text-xs font-bold border",
+                isHot
+                  ? "text-green-400 bg-green-500/10 border-green-500/20"
+                  : "text-red-400 bg-red-500/10 border-red-500/20"
+              )}>
+                {isHot ? <Flame className="inline w-3 h-3 mr-1" /> : <TrendingDown className="inline w-3 h-3 mr-1" />}
+                {Math.abs(streak)} in a row {isHot ? "won" : "lost"}
+              </span>
+            );
+          })()}
+        </div>
       </div>
       <div className="grid grid-cols-4 gap-2">
         {[

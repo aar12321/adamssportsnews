@@ -155,11 +155,23 @@ function TeamDetail({ team }: { team: any }) {
 }
 
 function ComparisonView({ sport }: { sport: string }) {
+  const { preferences, updatePreferences } = useUserPreferences();
   const [team1Query, setTeam1Query] = useState("");
   const [team2Query, setTeam2Query] = useState("");
   const [selectedTeam1, setSelectedTeam1] = useState<string | null>(null);
   const [selectedTeam2, setSelectedTeam2] = useState<string | null>(null);
   const [mode, setMode] = useState<"teams" | "players">("teams");
+
+  // Teams and players are sport-scoped; if the user changes the top-level
+  // sport we can't carry stale selections over or the compare request will
+  // ask for (e.g.) NBA teams under sport=football and come back empty.
+  useEffect(() => {
+    setTeam1Query("");
+    setTeam2Query("");
+    setSelectedTeam1(null);
+    setSelectedTeam2(null);
+    setMode("teams");
+  }, [sport]);
 
   const { data: teams } = useQuery({
     queryKey: ["/api/analyst/teams", sport],
@@ -170,7 +182,9 @@ function ComparisonView({ sport }: { sport: string }) {
   });
 
   const { data: comparison, isLoading } = useQuery({
-    queryKey: ["/api/analyst/teams/compare", selectedTeam1, selectedTeam2],
+    // sport must be part of the key so "Boston Celtics vs Dallas Cowboys"
+    // under basketball and football aren't served from the same cache entry.
+    queryKey: ["/api/analyst/teams/compare", sport, selectedTeam1, selectedTeam2],
     queryFn: async () => {
       if (!selectedTeam1 || !selectedTeam2) return null;
       const res = await fetch("/api/analyst/teams/compare", {
@@ -183,6 +197,34 @@ function ComparisonView({ sport }: { sport: string }) {
     enabled: !!selectedTeam1 && !!selectedTeam2,
   });
 
+  // Persist successful compares into preferences so the user can jump
+  // back to a recent matchup in one click. Dedupe by sport+pair (order-
+  // independent) and keep the six most recent.
+  useEffect(() => {
+    if (!comparison || comparison.error) return;
+    if (!selectedTeam1 || !selectedTeam2) return;
+    const pairKey = [selectedTeam1, selectedTeam2].map(t => t.toLowerCase()).sort().join("::");
+    const current = preferences.analyst?.compareHistory || [];
+    const filtered = current.filter(entry => {
+      if (!Array.isArray(entry) || entry.length < 3) return true;
+      const [s, a, b] = entry;
+      const k = [a, b].map(t => t.toLowerCase()).sort().join("::");
+      return !(s === sport && k === pairKey);
+    });
+    const next = [[sport, selectedTeam1, selectedTeam2], ...filtered].slice(0, 6);
+    // Only write if the most-recent entry actually changed, otherwise
+    // this would trigger a preferences sync on every render.
+    if (JSON.stringify(next[0]) === JSON.stringify(current[0])) return;
+    updatePreferences({
+      analyst: { ...preferences.analyst, compareHistory: next },
+    });
+  }, [comparison, selectedTeam1, selectedTeam2, sport, preferences.analyst, updatePreferences]);
+
+  const recentForSport = useMemo(() => {
+    const history = preferences.analyst?.compareHistory || [];
+    return history.filter(e => Array.isArray(e) && e.length >= 3 && e[0] === sport).slice(0, 4);
+  }, [preferences.analyst, sport]);
+
   const filteredTeams1 = (teams || []).filter((t: any) =>
     !team1Query || t.name.toLowerCase().includes(team1Query.toLowerCase())
   );
@@ -192,6 +234,28 @@ function ComparisonView({ sport }: { sport: string }) {
 
   return (
     <div className="space-y-4">
+      {recentForSport.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Recent compares</p>
+          <div className="scroll-row">
+            {recentForSport.map(([, t1, t2], i) => (
+              <button
+                key={`${t1}-${t2}-${i}`}
+                type="button"
+                onClick={() => {
+                  setSelectedTeam1(t1);
+                  setSelectedTeam2(t2);
+                  setTeam1Query(t1);
+                  setTeam2Query(t2);
+                }}
+                className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border bg-muted border-transparent text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all"
+              >
+                {t1} <span className="text-muted-foreground/60">vs</span> {t2}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <label className="text-xs font-semibold text-muted-foreground">Team 1</label>

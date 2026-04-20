@@ -59,8 +59,16 @@ export class ScoresService {
 
       const allScores: Score[] = [];
 
-      if (espnScores.status === "fulfilled") allScores.push(...espnScores.value);
-      if (sportsDbScores.status === "fulfilled") allScores.push(...sportsDbScores.value);
+      if (espnScores.status === "fulfilled") {
+        allScores.push(...espnScores.value);
+      } else {
+        console.warn("[scores] ESPN feed rejected:", espnScores.reason?.message || espnScores.reason);
+      }
+      if (sportsDbScores.status === "fulfilled") {
+        allScores.push(...sportsDbScores.value);
+      } else {
+        console.warn("[scores] TheSportsDB feed rejected:", sportsDbScores.reason?.message || sportsDbScores.reason);
+      }
 
       // Remove duplicates and cache
       const uniqueScores = this.deduplicateScores(allScores);
@@ -109,13 +117,16 @@ export class ScoresService {
     };
 
     try {
-      const endpoints = sportId
-        ? [espnEndpoints[sportId]]
-        : Object.values(espnEndpoints);
+      // Iterate with sport key in hand so each event is attributed to the
+      // sport of the endpoint we actually queried, rather than relying on
+      // slug parsing (which silently defaulted unknown slugs to basketball).
+      const entries = sportId
+        ? (espnEndpoints[sportId] ? [[sportId, espnEndpoints[sportId]] as [SportId, string]] : [])
+        : (Object.entries(espnEndpoints) as [SportId, string][]);
 
       const allScores: Score[] = [];
 
-      for (const endpoint of endpoints) {
+      for (const [endpointSport, endpoint] of entries) {
         if (!endpoint) continue;
         const response = await fetch(endpoint, {
           signal: AbortSignal.timeout(10000),
@@ -123,7 +134,7 @@ export class ScoresService {
         if (!response || !response.ok) continue;
 
         const data = await response.json();
-        
+
         // ESPN scoreboard structure
         if (data.events && Array.isArray(data.events)) {
           for (const event of data.events) {
@@ -136,10 +147,15 @@ export class ScoresService {
             if (!homeTeam || !awayTeam) continue;
 
             const status = this.parseESPNStatus(event.status?.type?.state);
-            
+
+            // Prefer the sport of the endpoint we hit; fall back to slug
+            // parsing only when the slug resolves unambiguously.
+            const slugSport = this.parseESPNSport(event.leagues?.[0]?.slug || "");
+            const resolvedSport: SportId = slugSport ?? endpointSport;
+
             allScores.push({
               id: `espn_${event.id}`,
-              sportId: this.parseESPNSport(event.leagues?.[0]?.slug || ""),
+              sportId: resolvedSport,
               league: event.leagues?.[0]?.name || "",
               homeTeam: homeTeam.team?.displayName || "",
               awayTeam: awayTeam.team?.displayName || "",
@@ -228,13 +244,18 @@ export class ScoresService {
   }
 
   /**
-   * Parse ESPN sport slug to our SportId
+   * Parse ESPN sport slug to our SportId. Returns null when the slug
+   * doesn't match anything we recognise, so the caller can fall back to
+   * the sport of the endpoint it actually queried instead of mislabeling
+   * the event as basketball.
    */
-  private parseESPNSport(slug: string): SportId {
+  private parseESPNSport(slug: string): SportId | null {
     if (slug.includes("basketball") || slug.includes("nba")) return "basketball";
     if (slug.includes("football") || slug.includes("nfl")) return "football";
-    if (slug.includes("soccer")) return "soccer";
-    return "basketball"; // Default
+    if (slug.includes("soccer") || slug.includes("eng.1") || slug.includes("esp.1") || slug.includes("uefa")) return "soccer";
+    if (slug.includes("baseball") || slug.includes("mlb")) return "baseball";
+    if (slug.includes("hockey") || slug.includes("nhl")) return "hockey";
+    return null;
   }
 
   /**

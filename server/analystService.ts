@@ -1,4 +1,4 @@
-import type { TeamStats, PlayerStats, HeadToHead } from "@shared/schema";
+import type { TeamStats, PlayerStats, HeadToHead, SportId } from "@shared/schema";
 
 const teamDatabase: TeamStats[] = [
   // NBA
@@ -309,7 +309,16 @@ export class AnalystService {
     return { player1, player2, categories, analysis };
   }
 
-  getHeadToHead(team1Name: string, team2Name: string): HeadToHead {
+  getHeadToHead(team1Name: string, team2Name: string, sport?: SportId): HeadToHead {
+    // If the caller didn't tell us which sport, look the teams up in the
+    // local database so "Real Madrid vs Barcelona" doesn't return
+    // sport: "basketball" downstream.
+    const resolvedSport: SportId =
+      sport ||
+      (this.getTeam(team1Name)?.sport as SportId | undefined) ||
+      (this.getTeam(team2Name)?.sport as SportId | undefined) ||
+      "basketball";
+
     // Generate realistic H2H data
     const t1Wins = Math.floor(Math.random() * 30) + 15;
     const t2Wins = Math.floor(Math.random() * 30) + 15;
@@ -334,7 +343,8 @@ export class AnalystService {
     return {
       team1: team1Name,
       team2: team2Name,
-      sport: "basketball",
+      sport: resolvedSport,
+      source: "mock",
       allTime: { team1Wins: t1Wins, team2Wins: t2Wins, ties },
       lastFive: {
         team1Wins: recentGames.filter(g => g.winner === team1Name).length,
