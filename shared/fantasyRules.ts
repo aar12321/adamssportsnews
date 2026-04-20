@@ -183,6 +183,100 @@ export function canFitFantasyRoster(
   return placed.size === players.length;
 }
 
+/**
+ * Return a greedy optimal lineup for `roster` under `sport`'s slot rules.
+ * Players with the highest `projectedPoints` go in first, filling specific
+ * slots before flex before wildcard. Anything that can't fit lands in the
+ * BN (bench) slot or, if BN is already full, the `unfit` list.
+ *
+ * Pure: never mutates `roster`. Consumers should treat the output as
+ * advisory (a start/sit recommender), not as a state change.
+ */
+export function assignFantasyLineup<
+  P extends { position?: string; projectedPoints?: number | null; id?: string }
+>(
+  roster: P[],
+  sport: string,
+): {
+  starters: { player: P; slot: string }[];
+  bench: P[];
+  unfit: P[];
+} | null {
+  if (!isFantasySportKey(sport)) return null;
+  const slots = [...FANTASY_SPORT_SLOTS[sport]];
+  const rules = SLOT_ELIGIBILITY[sport];
+
+  const byProjectionDesc = roster
+    .map((p, idx) => ({ p, idx, proj: Number(p.projectedPoints) || 0 }))
+    .sort((a, b) => b.proj - a.proj)
+    .map(({ p, idx }) => ({
+      p,
+      idx,
+      pos: normalizeFantasyPosition(p.position, sport),
+    }));
+
+  const specific: number[] = [];
+  const flex: number[] = [];
+  const wildcard: number[] = [];
+  const bench: number[] = [];
+  slots.forEach((s, i) => {
+    if (s === "BN" || s === "IR") {
+      bench.push(i);
+      return;
+    }
+    const r = rules[s];
+    if (!r) { specific.push(i); return; }
+    if (r.includes("*")) wildcard.push(i);
+    else if (r.length === 1 && r[0] === s) specific.push(i);
+    else flex.push(i);
+  });
+
+  const used = new Set<number>();
+  const placedIdx = new Set<number>();
+  const starters: { player: P; slot: string }[] = [];
+  const benched: P[] = [];
+  const unfit: P[] = [];
+
+  const claim = (slotIdx: number, p: P, idx: number) => {
+    used.add(slotIdx);
+    placedIdx.add(idx);
+    starters.push({ player: p, slot: slots[slotIdx] });
+  };
+
+  // Fill specific slots first.
+  for (const { p, idx, pos } of byProjectionDesc) {
+    if (!pos) continue;
+    const i = specific.find((s) => !used.has(s) && slots[s] === pos);
+    if (i !== undefined) claim(i, p, idx);
+  }
+  // Then flex slots for remaining players.
+  for (const { p, idx, pos } of byProjectionDesc) {
+    if (placedIdx.has(idx) || !pos) continue;
+    const i = flex.find((s) => !used.has(s) && slotAcceptsPosition(slots[s], pos, sport));
+    if (i !== undefined) claim(i, p, idx);
+  }
+  // Wildcard (UTIL etc) for anyone still unplaced.
+  for (const { p, idx } of byProjectionDesc) {
+    if (placedIdx.has(idx)) continue;
+    const i = wildcard.find((s) => !used.has(s));
+    if (i !== undefined) claim(i, p, idx);
+  }
+  // Overflow to bench, then unfit.
+  for (const { p, idx } of byProjectionDesc) {
+    if (placedIdx.has(idx)) continue;
+    const i = bench.find((s) => !used.has(s));
+    if (i !== undefined) {
+      used.add(i);
+      placedIdx.add(idx);
+      benched.push(p);
+    } else {
+      unfit.push(p);
+    }
+  }
+
+  return { starters, bench: benched, unfit };
+}
+
 export function fantasyPositionCapacity(
   roster: { position?: string }[],
   position: string,

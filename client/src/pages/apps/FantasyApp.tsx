@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   SLOT_ELIGIBILITY,
+  assignFantasyLineup,
   canFitFantasyRoster as canFitRoster,
   fantasyPositionCapacity as positionCapacity,
   isFantasySportKey as isSportKey,
@@ -754,40 +755,43 @@ export default function FantasyApp() {
               {roster.length > 0 && isSportKey(selectedSport) && SPORT_CONFIG[selectedSport] && (() => {
                 const sport = selectedSport as SportKey;
                 const config = SPORT_CONFIG[sport];
-                const rules = SLOT_ELIGIBILITY[sport];
-                // Greedy slot assignment mirroring canFitRoster
                 const slots = config.positions;
-                const assignments: (any | null)[] = slots.map(() => null);
-                const placed = new Set<string>();
 
-                // Pass 1: exact matches — slots whose only eligibility is themselves
-                slots.forEach((slot, i) => {
-                  const r = rules[slot];
-                  if (r && !(r.length === 1 && r[0] === slot)) return;
-                  const match = roster.find((p: any) => !placed.has(p.id) && normalizePosition(p.position, sport) === slot);
-                  if (match) { assignments[i] = match; placed.add(match.id); }
-                });
-                // Pass 2: flex slots (accept multiple positions but not everything)
-                slots.forEach((slot, i) => {
-                  const r = rules[slot];
-                  if (!r || r.includes("*") || (r.length === 1 && r[0] === slot)) return;
-                  const match = roster.find((p: any) => !placed.has(p.id) && slotAccepts(slot, normalizePosition(p.position, sport), sport));
-                  if (match) { assignments[i] = match; placed.add(match.id); }
-                });
-                // Pass 3: wildcards (UTIL/BN/IR)
-                slots.forEach((slot, i) => {
-                  const r = rules[slot];
-                  if (!r || !r.includes("*")) return;
-                  const match = roster.find((p: any) => !placed.has(p.id));
-                  if (match) { assignments[i] = match; placed.add(match.id); }
-                });
+                // Projection-optimal assignment: highest-projected player wins
+                // their specific slot first, then flex, then wildcard. Players
+                // that don't fit any starter slot fall to BN.
+                const lineup = assignFantasyLineup(roster as any[], sport);
+                const assignments: (any | null)[] = slots.map(() => null);
+                const seen = new Set<number>();
+                if (lineup) {
+                  const { starters, bench, unfit } = lineup;
+                  // Place starters into the first matching non-bench slot.
+                  starters.forEach(({ player, slot }) => {
+                    const idx = slots.findIndex((s, i) => s === slot && !seen.has(i));
+                    if (idx >= 0) { assignments[idx] = player; seen.add(idx); }
+                  });
+                  // Fill BN/IR slots with overflow bench players in projection order.
+                  const wildcard = slots
+                    .map((s, i) => ({ s, i }))
+                    .filter(({ s, i }) => (s === "BN" || s === "IR") && !seen.has(i));
+                  [...bench, ...unfit].forEach((p) => {
+                    const next = wildcard.find(({ i }) => !seen.has(i));
+                    if (next) { assignments[next.i] = p; seen.add(next.i); }
+                  });
+                }
+
+                const placedCount = assignments.filter((a) => a != null).length;
+                const starterTotal = (lineup?.starters || []).reduce((s, { player }) =>
+                  s + (Number((player as any).projectedPoints) || 0), 0);
 
                 return (
                   <div className="glass-card p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div>
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Starting Lineup</p>
-                        <p className="text-xs text-muted-foreground/70 mt-0.5">{config.scoringFormat} · {slots.length} slots · {placed.size}/{slots.length} filled</p>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Recommended Lineup</p>
+                        <p className="text-xs text-muted-foreground/70 mt-0.5">
+                          {config.scoringFormat} · {placedCount}/{slots.length} filled · <span className="text-primary font-semibold num">{starterTotal.toFixed(1)} proj</span>
+                        </p>
                       </div>
                       <button
                         onClick={() => {
@@ -803,21 +807,32 @@ export default function FantasyApp() {
                     <div className="space-y-1.5">
                       {slots.map((pos, i) => {
                         const assigned = assignments[i];
+                        const isBench = pos === "BN" || pos === "IR";
                         return (
                           <div
                             key={`${pos}-${i}`}
                             className={cn(
                               "flex items-center gap-3 px-3 py-2 rounded-lg border",
                               assigned
-                                ? "bg-primary/10 border-primary/30"
+                                ? isBench
+                                  ? "bg-muted/30 border-border"
+                                  : "bg-primary/10 border-primary/30"
                                 : "bg-muted/20 border-dashed border-border"
                             )}
                           >
-                            <span className="text-xs font-bold text-muted-foreground w-10 flex-shrink-0">{pos}</span>
+                            <span className={cn(
+                              "text-xs font-bold w-10 flex-shrink-0",
+                              isBench ? "text-muted-foreground/70" : "text-muted-foreground"
+                            )}>{pos}</span>
                             {assigned ? (
                               <>
-                                <span className="text-sm font-medium text-foreground flex-1 truncate">{assigned.name}</span>
-                                <span className="text-xs text-muted-foreground flex-shrink-0">{normalizePosition(assigned.position, selectedSport) || assigned.position} · {assigned.team?.split(" ").slice(-1)[0]}</span>
+                                <span className={cn(
+                                  "text-sm font-medium flex-1 truncate",
+                                  isBench ? "text-muted-foreground" : "text-foreground"
+                                )}>{assigned.name}</span>
+                                <span className="text-xs text-muted-foreground flex-shrink-0 num">
+                                  {assigned.projectedPoints != null ? `${Number(assigned.projectedPoints).toFixed(1)} proj` : normalizePosition(assigned.position, selectedSport) || assigned.position}
+                                </span>
                               </>
                             ) : (
                               <span className="text-xs text-muted-foreground italic">empty slot</span>
