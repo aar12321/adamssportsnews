@@ -20,6 +20,8 @@ function getOrCreateAccount(userId: string): MockAccount {
       totalProfit: 0,
       winRate: 0,
       roi: 0,
+      currentStreak: 0,
+      bestWinStreak: 0,
     });
   }
   return mockAccounts.get(userId)!;
@@ -370,6 +372,26 @@ export class BettingService {
     account.winRate = settledBets.length > 0 ? wonCount / settledBets.length : 0;
     account.roi = account.totalWagered > 0 ? (account.totalProfit / account.totalWagered) * 100 : 0;
     account.balance = Math.round(account.balance * 100) / 100;
+
+    // Recompute streaks from the chronological list of won/lost bets.
+    // Push/cancelled bets are neutral — they don't extend or break the
+    // current run either way.
+    const runOrder = settledBets
+      .filter(b => b.status === "won" || b.status === "lost")
+      .slice()
+      .sort((a, b) => new Date(a.settledAt || a.placedAt).getTime() - new Date(b.settledAt || b.placedAt).getTime());
+    let current = 0;
+    let best = account.bestWinStreak || 0;
+    for (const b of runOrder) {
+      if (b.status === "won") {
+        current = current >= 0 ? current + 1 : 1;
+        if (current > best) best = current;
+      } else {
+        current = current <= 0 ? current - 1 : -1;
+      }
+    }
+    account.currentStreak = current;
+    account.bestWinStreak = best;
   }
 
   cancelBet(userId: string, betId: string): MockBet | { error: string } {
@@ -401,6 +423,8 @@ export class BettingService {
       totalProfit: 0,
       winRate: 0,
       roi: 0,
+      currentStreak: 0,
+      bestWinStreak: 0,
     };
     mockAccounts.set(userId, account);
     mockBets.set(userId, []);

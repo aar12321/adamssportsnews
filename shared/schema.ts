@@ -151,6 +151,10 @@ export interface MockAccount {
   totalProfit: number;
   winRate: number;
   roi: number;
+  /** Current W/L streak (positive = wins in a row, negative = losses, 0 = none yet or just pushed). */
+  currentStreak?: number;
+  /** Longest winning streak this account has ever had. */
+  bestWinStreak?: number;
 }
 
 // ==================== FANTASY TYPES ====================
