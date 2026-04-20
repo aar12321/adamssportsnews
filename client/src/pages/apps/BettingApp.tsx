@@ -752,6 +752,18 @@ export default function BettingApp() {
     retry: 2,
   });
 
+  // Lower-case favourites for cheap substring matching during sort/highlight.
+  const favoriteTeamsLower = useMemo(
+    () => (preferences.favoriteTeams || []).map(t => t.toLowerCase()),
+    [preferences.favoriteTeams]
+  );
+  const isFavoriteGame = useCallback((g: GameRow) => {
+    if (!favoriteTeamsLower.length) return false;
+    const home = g.home.toLowerCase();
+    const away = g.away.toLowerCase();
+    return favoriteTeamsLower.some(f => home.includes(f) || away.includes(f) || f.includes(home) || f.includes(away));
+  }, [favoriteTeamsLower]);
+
   const displayGames: GameRow[] = useMemo(() => {
     const raw = scheduleData?.games as
       | { id: string; homeTeam: string; awayTeam: string; league: string; startTime?: string; status?: string }[]
@@ -769,7 +781,7 @@ export default function BettingApp() {
       : (SPORT_GAMES[selectedSport] || []);
 
     // Only show upcoming games: not finished, and starting in the future
-    return mapped.filter((g) => {
+    const upcoming = mapped.filter((g) => {
       if (g.status === "finished") return false;
       if (g.startTime) {
         const start = new Date(g.startTime).getTime();
@@ -777,7 +789,19 @@ export default function BettingApp() {
       }
       return true;
     });
-  }, [scheduleData, selectedSport]);
+    // Float games involving the user's favourite teams to the top,
+    // preserving start-time order within each group.
+    return upcoming
+      .slice()
+      .sort((a, b) => {
+        const fa = isFavoriteGame(a) ? 0 : 1;
+        const fb = isFavoriteGame(b) ? 0 : 1;
+        if (fa !== fb) return fa - fb;
+        const ta = a.startTime ? new Date(a.startTime).getTime() : Number.POSITIVE_INFINITY;
+        const tb = b.startTime ? new Date(b.startTime).getTime() : Number.POSITIVE_INFINITY;
+        return ta - tb;
+      });
+  }, [scheduleData, selectedSport, isFavoriteGame]);
 
   const filteredGames = useMemo(() => {
     const q = debouncedGameSearch.trim().toLowerCase();
@@ -989,33 +1013,45 @@ export default function BettingApp() {
                   ))}
                 </div>
               )}
-              {!loadingSchedule && filteredGames.map((game) => (
-                <button
-                  key={game.id || `${game.home}-${game.away}-${game.startTime || ""}`}
-                  onClick={() => setSelectedGame(game)}
-                  className={cn(
-                    "w-full text-left p-3 rounded-xl border transition-all",
-                    selectedGame?.home === game.home && selectedGame?.away === game.away
-                      ? "bg-primary/15 border-primary/40 text-foreground"
-                      : "bg-muted/30 border-border hover:border-primary/30 text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <p className="text-xs font-semibold text-primary mb-1">{game.league}</p>
-                  <p className="text-xs font-medium">{game.away}</p>
-                  <p className="text-xs text-muted-foreground">@ {game.home}</p>
-                  {game.startTime && (
-                    <p className="text-[10px] text-muted-foreground/80 mt-1 num">
-                      {new Date(game.startTime).toLocaleString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                      {game.status ? ` · ${game.status}` : ""}
-                    </p>
-                  )}
-                </button>
-              ))}
+              {!loadingSchedule && filteredGames.map((game) => {
+                const isFav = isFavoriteGame(game);
+                return (
+                  <button
+                    key={game.id || `${game.home}-${game.away}-${game.startTime || ""}`}
+                    onClick={() => setSelectedGame(game)}
+                    className={cn(
+                      "w-full text-left p-3 rounded-xl border transition-all",
+                      selectedGame?.home === game.home && selectedGame?.away === game.away
+                        ? "bg-primary/15 border-primary/40 text-foreground"
+                        : isFav
+                          ? "bg-primary/5 border-primary/30 text-foreground hover:border-primary/50"
+                          : "bg-muted/30 border-border hover:border-primary/30 text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <p className="text-xs font-semibold text-primary">{game.league}</p>
+                      {isFav && (
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-primary bg-primary/15 border border-primary/30 rounded-full px-1.5 py-0.5">
+                          ★ Following
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs font-medium">{game.away}</p>
+                    <p className="text-xs text-muted-foreground">@ {game.home}</p>
+                    {game.startTime && (
+                      <p className="text-[10px] text-muted-foreground/80 mt-1 num">
+                        {new Date(game.startTime).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                        {game.status ? ` · ${game.status}` : ""}
+                      </p>
+                    )}
+                  </button>
+                );
+              })}
               {!loadingSchedule && filteredGames.length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-4">
                   {gameSearch.trim() ? "No games match your search" : "No upcoming games for this league"}
