@@ -8,6 +8,7 @@ import { ViewModeProvider } from "@/contexts/ViewModeContext";
 import { UserPreferencesProvider } from "@/contexts/UserPreferencesContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import MainLayout from "@/components/layout/MainLayout";
+import AppErrorBoundary from "@/components/AppErrorBoundary";
 import Dashboard from "@/pages/Dashboard";
 import Apps from "@/pages/Apps";
 import BettingApp from "@/pages/apps/BettingApp";
@@ -62,20 +63,22 @@ function AuthGate() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <ViewModeProvider>
-          <AuthProvider>
-            <UserPreferencesProvider>
-              <TooltipProvider>
-                <Toaster />
-                <AuthGate />
-              </TooltipProvider>
-            </UserPreferencesProvider>
-          </AuthProvider>
-        </ViewModeProvider>
-      </ThemeProvider>
-    </QueryClientProvider>
+    <AppErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider>
+          <ViewModeProvider>
+            <AuthProvider>
+              <UserPreferencesProvider>
+                <TooltipProvider>
+                  <Toaster />
+                  <AuthGate />
+                </TooltipProvider>
+              </UserPreferencesProvider>
+            </AuthProvider>
+          </ViewModeProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </AppErrorBoundary>
   );
 }
 
