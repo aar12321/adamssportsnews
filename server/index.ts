@@ -4,6 +4,9 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { attachUser } from "./auth";
+import { installShutdownHooks, isPersistenceEnabled, persistenceDir } from "./persistence";
+
+installShutdownHooks();
 
 const app = express();
 
@@ -106,8 +109,15 @@ app.use((req, res, next) => {
         "SUPABASE_URL / SUPABASE_ANON_KEY not set — per-user routes run in INSECURE dev mode."
       );
     }
+    if (isPersistenceEnabled()) {
+      console.log(`[startup] Betting + preferences persisting to ${persistenceDir()} (JSON snapshots).`);
+    } else {
+      warnings.push(
+        "Persistence disabled (DATA_DIR not writable). Betting bankroll and user preferences will be wiped on every restart."
+      );
+    }
     warnings.push(
-      "Betting bankroll, user preferences, and fantasy rosters live in server memory (or the client's localStorage) and will be wiped on every restart. Wire a real DB before shipping real money or shareable state."
+      "Fantasy rosters still live in the client's localStorage. A proper Postgres migration is the next step before multi-device sync."
     );
     if (warnings.length) {
       console.warn("\n[startup] readiness notes:");

@@ -1,9 +1,26 @@
 import type { BetAnalysis, MockBet, MockAccount, BetType } from "@shared/schema";
 import { oddsApiService } from "./oddsApiService";
+import { readSnapshot, scheduleSnapshot } from "./persistence";
 
-// In-memory storage for mock betting (per session)
-const mockAccounts = new Map<string, MockAccount>();
-const mockBets = new Map<string, MockBet[]>();
+// Betting state lives in these maps at runtime. On boot we hydrate from
+// data/betting.json (when persistence is available); mutations debounce a
+// write back so a server restart doesn't wipe user bankrolls.
+interface BettingSnapshot {
+  accounts: [string, MockAccount][];
+  bets: [string, MockBet[]][];
+}
+
+const SNAPSHOT_NAME = "betting";
+const initial = readSnapshot<BettingSnapshot>(SNAPSHOT_NAME, { accounts: [], bets: [] });
+const mockAccounts = new Map<string, MockAccount>(initial.accounts);
+const mockBets = new Map<string, MockBet[]>(initial.bets);
+
+function saveBetting() {
+  scheduleSnapshot(SNAPSHOT_NAME, () => ({
+    accounts: Array.from(mockAccounts.entries()),
+    bets: Array.from(mockBets.entries()),
+  }));
+}
 
 const DEFAULT_BALANCE = 10000; // $10,000 starting mock balance
 
@@ -23,6 +40,7 @@ function getOrCreateAccount(userId: string): MockAccount {
       currentStreak: 0,
       bestWinStreak: 0,
     });
+    saveBetting();
   }
   return mockAccounts.get(userId)!;
 }
@@ -329,6 +347,7 @@ export class BettingService {
     const userBets = getUserBets(userId);
     userBets.push(newBet);
 
+    saveBetting();
     return newBet;
   }
 
@@ -392,6 +411,8 @@ export class BettingService {
     }
     account.currentStreak = current;
     account.bestWinStreak = best;
+
+    saveBetting();
   }
 
   cancelBet(userId: string, betId: string): MockBet | { error: string } {
@@ -408,6 +429,7 @@ export class BettingService {
     account.totalWagered -= bet.amount;
     account.balance = Math.round(account.balance * 100) / 100;
 
+    saveBetting();
     return bet;
   }
 
@@ -428,6 +450,7 @@ export class BettingService {
     };
     mockAccounts.set(userId, account);
     mockBets.set(userId, []);
+    saveBetting();
     return account;
   }
 

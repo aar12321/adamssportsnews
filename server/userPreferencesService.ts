@@ -1,4 +1,5 @@
 import type { UserPreferences } from "@shared/schema";
+import { readSnapshot, scheduleSnapshot } from "./persistence";
 
 const defaultPreferences: UserPreferences = {
   userId: "default",
@@ -40,12 +41,21 @@ const defaultPreferences: UserPreferences = {
   },
 };
 
-const userPreferencesStore = new Map<string, UserPreferences>();
+// Hydrate from disk on boot so restarts don't reset people's display name,
+// favourites, dashboard layout, etc. Mutations below debounce a write back.
+const SNAPSHOT_NAME = "preferences";
+const initialEntries = readSnapshot<[string, UserPreferences][]>(SNAPSHOT_NAME, []);
+const userPreferencesStore = new Map<string, UserPreferences>(initialEntries);
+
+function savePreferences() {
+  scheduleSnapshot(SNAPSHOT_NAME, () => Array.from(userPreferencesStore.entries()));
+}
 
 export class UserPreferencesService {
   getPreferences(userId: string = "default"): UserPreferences {
     if (!userPreferencesStore.has(userId)) {
       userPreferencesStore.set(userId, { ...defaultPreferences, userId });
+      savePreferences();
     }
     return userPreferencesStore.get(userId)!;
   }
@@ -55,12 +65,14 @@ export class UserPreferencesService {
     const updated = this.deepMerge(current, updates) as UserPreferences;
     updated.userId = userId;
     userPreferencesStore.set(userId, updated);
+    savePreferences();
     return updated;
   }
 
   resetPreferences(userId: string = "default"): UserPreferences {
     const fresh = { ...defaultPreferences, userId };
     userPreferencesStore.set(userId, fresh);
+    savePreferences();
     return fresh;
   }
 
