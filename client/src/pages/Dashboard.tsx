@@ -9,6 +9,7 @@ import NewsFeed from "@/components/dashboard/NewsFeed";
 import AppSummaries from "@/components/dashboard/AppSummaries";
 import NextGameCard from "@/components/dashboard/NextGameCard";
 import InjuryAlertsCard from "@/components/dashboard/InjuryAlertsCard";
+import PendingBetsCard from "@/components/dashboard/PendingBetsCard";
 
 type DashboardTabKey = "scores" | "news" | "apps";
 
@@ -84,6 +85,7 @@ export default function Dashboard() {
           favoriteTeams={preferences.favoriteTeams}
           displayName={preferences.displayName}
         />
+        <PendingBetsCard />
         <InjuryAlertsCard
           favoriteTeams={preferences.favoriteTeams}
           favoritePlayers={preferences.favoritePlayers}
