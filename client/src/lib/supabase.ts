@@ -7,17 +7,30 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
+/**
+ * Explicit-shape stub. Callers that destructure (e.g. `.onAuthStateChange`'s
+ * `{ data: { subscription } }`) would otherwise crash when env vars are
+ * missing — and that sync throw inside AuthContext's init useEffect leaves
+ * `loading=true` forever, which presents as a blank/stuck screen. Every
+ * method the app actually calls gets a typed no-op here.
+ */
 function makeStub(): SupabaseClient {
-  const err = () =>
-    Promise.resolve({
-      data: { user: null, session: null },
-      error: { message: "Supabase not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY." } as any,
-    });
-  const chain: any = new Proxy(function () {}, {
-    get: () => chain,
-    apply: () => err(),
-  });
-  return chain as SupabaseClient;
+  const notConfigured = {
+    message: "Supabase not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.",
+  } as any;
+  const noopSubscription = {
+    data: { subscription: { id: "stub", callback: () => {}, unsubscribe: () => {} } },
+  };
+  const auth = {
+    getSession: async () => ({ data: { session: null }, error: null }),
+    getUser: async () => ({ data: { user: null }, error: notConfigured }),
+    signInWithPassword: async () => ({ data: { user: null, session: null }, error: notConfigured }),
+    signUp: async () => ({ data: { user: null, session: null }, error: notConfigured }),
+    signInWithOAuth: async () => ({ data: { provider: "google", url: null }, error: notConfigured }),
+    signOut: async () => ({ error: null }),
+    onAuthStateChange: (_handler: any) => noopSubscription,
+  };
+  return { auth } as unknown as SupabaseClient;
 }
 
 export const supabase: SupabaseClient =

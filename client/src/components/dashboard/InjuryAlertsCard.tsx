@@ -41,18 +41,23 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export default function InjuryAlertsCard({ favoriteTeams, favoritePlayers }: InjuryAlertsCardProps) {
+  const teams = Array.isArray(favoriteTeams) ? favoriteTeams : [];
+  const players = Array.isArray(favoritePlayers) ? favoritePlayers : [];
+  // Only fetch when the user actually has favourites; otherwise the
+  // card would render nothing anyway and the request is wasted.
+  const enabled = teams.length > 0 || players.length > 0;
   const { data } = useQuery({
     queryKey: ["/api/fantasy/injured", "briefing"],
     queryFn: () => fetchJson<InjuredPlayer[]>("/api/fantasy/injured"),
     staleTime: 5 * 60_000,
     refetchInterval: 10 * 60_000,
+    enabled,
   });
 
   const relevant = useMemo(() => {
-    if (!Array.isArray(data)) return [];
-    if (!favoriteTeams.length && !favoritePlayers.length) return [];
-    return data.filter(p => isRelevant(p, favoriteTeams, favoritePlayers)).slice(0, 3);
-  }, [data, favoriteTeams, favoritePlayers]);
+    if (!Array.isArray(data) || !enabled) return [];
+    return data.filter(p => isRelevant(p, teams, players)).slice(0, 3);
+  }, [data, teams, players, enabled]);
 
   if (relevant.length === 0) return null;
 

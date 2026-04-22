@@ -28,46 +28,79 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const tokenRef = useRef<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
-      setSession(currentSession);
-      setUser(currentSession?.user ?? null);
-      tokenRef.current = currentSession?.access_token ?? null;
-      setAccessToken(tokenRef.current);
-      setLoading(false);
-    });
+    // Guard rails: Supabase can throw at import time (missing env), its
+    // async init can reject, or the network can hang. Any of those left
+    // `loading=true` forever under the old code and presented to the user
+    // as a blank/stuck screen. Wrap everything, and force-release loading
+    // after a short grace period no matter what.
+    let released = false;
+    const release = () => {
+      if (!released) {
+        released = true;
+        setLoading(false);
+      }
+    };
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, newSession) => {
-      setSession(newSession);
-      setUser(newSession?.user ?? null);
-      tokenRef.current = newSession?.access_token ?? null;
-      setAccessToken(tokenRef.current);
-      setLoading(false);
+    try {
+      supabase.auth.getSession()
+        .then(({ data: { session: currentSession } }) => {
+          setSession(currentSession);
+          setUser(currentSession?.user ?? null);
+          tokenRef.current = currentSession?.access_token ?? null;
+          setAccessToken(tokenRef.current);
+          release();
+        })
+        .catch((err) => {
+          console.warn("[auth] getSession failed:", err?.message ?? err);
+          release();
+        });
+    } catch (err: any) {
+      console.warn("[auth] getSession threw:", err?.message ?? err);
+      release();
+    }
 
-      // SIGNED_IN fires after the OAuth callback completes. If this is
-      // a Google user who hasn't been through onboarding yet (no flag in
-      // localStorage for their userId), route them to onboarding.
-      if (event === "SIGNED_IN" && newSession?.user) {
-        const uid = newSession.user.id;
-        const perUserDone = localStorage.getItem(`onboarding_complete_${uid}`);
-        const legacyDone = localStorage.getItem("onboarding_complete");
-        if (!perUserDone && !legacyDone) {
-          setIsNewUser(true);
+    let subscription: { unsubscribe: () => void } | null = null;
+    try {
+      const result = supabase.auth.onAuthStateChange((event, newSession) => {
+        setSession(newSession);
+        setUser(newSession?.user ?? null);
+        tokenRef.current = newSession?.access_token ?? null;
+        setAccessToken(tokenRef.current);
+        release();
+
+        // SIGNED_IN fires after the OAuth callback completes. If this is
+        // a Google user who hasn't been through onboarding yet (no flag in
+        // localStorage for their userId), route them to onboarding.
+        if (event === "SIGNED_IN" && newSession?.user) {
+          const uid = newSession.user.id;
+          const perUserDone = localStorage.getItem(`onboarding_complete_${uid}`);
+          const legacyDone = localStorage.getItem("onboarding_complete");
+          if (!perUserDone && !legacyDone) {
+            setIsNewUser(true);
+          }
         }
-      }
 
-      // Any time the session goes away (explicit sign-out, token
-      // expiry, session revoked in Supabase dashboard) wipe the query
-      // cache so cached rows from the previous user never flash into
-      // the next user's UI.
-      if (event === "SIGNED_OUT" || !newSession) {
-        queryClient.clear();
-      }
-    });
+        // Any time the session goes away (explicit sign-out, token
+        // expiry, session revoked in Supabase dashboard) wipe the query
+        // cache so cached rows from the previous user never flash into
+        // the next user's UI.
+        if (event === "SIGNED_OUT" || !newSession) {
+          queryClient.clear();
+        }
+      });
+      subscription = result?.data?.subscription ?? null;
+    } catch (err: any) {
+      console.warn("[auth] onAuthStateChange threw:", err?.message ?? err);
+    }
+
+    // Belt-and-braces timeout: if neither callback fires within 4s (dev
+    // server down, network stuck, etc.) render the app anyway so the
+    // user gets SOMETHING instead of a forever-spinner.
+    const timeout = setTimeout(release, 4000);
 
     return () => {
-      subscription.unsubscribe();
+      clearTimeout(timeout);
+      try { subscription?.unsubscribe(); } catch { /* ignore */ }
     };
   }, []);
 

@@ -49,6 +49,8 @@ function formatKickoff(iso: string): { day: string; time: string; hoursAway: num
 }
 
 export default function NextGameCard({ favoriteTeams, displayName }: NextGameCardProps) {
+  const favorites = Array.isArray(favoriteTeams) ? favoriteTeams : [];
+  const name = typeof displayName === "string" && displayName.trim() ? displayName : "Sports Fan";
   const { data, isLoading } = useQuery({
     queryKey: ["/api/scores", "next-game"],
     queryFn: () => fetchJson<{ scores: Score[] }>("/api/scores"),
@@ -57,22 +59,22 @@ export default function NextGameCard({ favoriteTeams, displayName }: NextGameCar
   });
 
   const nextGame = useMemo(() => {
-    if (!favoriteTeams.length) return null;
+    if (!favorites.length) return null;
     const scores = data?.scores ?? [];
     // Prefer a LIVE game involving a favourite, then the soonest upcoming.
     const live = scores.find(s =>
-      s.status === "live" && (teamMatches(s.homeTeam, favoriteTeams) || teamMatches(s.awayTeam, favoriteTeams))
+      s.status === "live" && (teamMatches(s.homeTeam, favorites) || teamMatches(s.awayTeam, favorites))
     );
     if (live) return { game: live, kind: "live" as const };
     const now = Date.now();
     const upcoming = scores
       .filter(s => s.status === "scheduled" && new Date(s.startTime).getTime() >= now)
-      .filter(s => teamMatches(s.homeTeam, favoriteTeams) || teamMatches(s.awayTeam, favoriteTeams))
+      .filter(s => teamMatches(s.homeTeam, favorites) || teamMatches(s.awayTeam, favorites))
       .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
     return upcoming[0] ? { game: upcoming[0], kind: "scheduled" as const } : null;
-  }, [data, favoriteTeams]);
+  }, [data, favorites]);
 
-  if (!favoriteTeams.length) {
+  if (!favorites.length) {
     return (
       <Link href="/profile">
         <a className="block glass-card p-4 hover:border-primary/30 transition-all">
@@ -106,7 +108,7 @@ export default function NextGameCard({ favoriteTeams, displayName }: NextGameCar
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-1">
-              Good {greetingFor(new Date())}, {displayName.split(" ")[0]}
+              Good {greetingFor(new Date())}, {name.split(" ")[0]}
             </p>
             <p className="text-sm text-foreground">
               No games on the slate for your favourite teams right now — check back tomorrow.
@@ -119,7 +121,7 @@ export default function NextGameCard({ favoriteTeams, displayName }: NextGameCar
 
   const { game, kind } = nextGame;
   const { day, time, hoursAway } = formatKickoff(game.startTime);
-  const favoritePlays = teamMatches(game.homeTeam, favoriteTeams) ? game.homeTeam : game.awayTeam;
+  const favoritePlays = teamMatches(game.homeTeam, favorites) ? game.homeTeam : game.awayTeam;
   const opponent = favoritePlays === game.homeTeam ? game.awayTeam : game.homeTeam;
   const isHome = favoritePlays === game.homeTeam;
   const soon = kind === "live" || hoursAway < 3;
