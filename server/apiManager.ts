@@ -12,6 +12,8 @@ export interface ApiStatus {
   consecutiveFailures: number;
   rateLimitRemaining?: number;
   rateLimitReset?: number;
+  /** Permanently disabled (e.g. missing API key). Does NOT auto-recover. */
+  disabled?: boolean;
 }
 
 export class ApiManager {
@@ -73,11 +75,24 @@ export class ApiManager {
   }
 
   /**
+   * Permanently disable a provider (e.g. missing API key). Skipped by
+   * isApiAvailable until resetApi is explicitly called.
+   */
+  markUnavailable(apiName: string, reason: string): void {
+    this.registerApi(apiName);
+    const status = this.apiStatuses.get(apiName)!;
+    status.disabled = true;
+    status.isHealthy = false;
+    status.lastError = reason;
+  }
+
+  /**
    * Check if an API is available (healthy and not rate limited)
    */
   isApiAvailable(apiName: string): boolean {
     const status = this.apiStatuses.get(apiName);
     if (!status) return false;
+    if (status.disabled) return false;
 
     // Check if unhealthy
     if (!status.isHealthy) {
@@ -128,7 +143,9 @@ export class ApiManager {
   }
 
   /**
-   * Reset an API's health status (manual recovery)
+   * Reset an API's health status (manual recovery). Also clears a
+   * permanent disable so operators can re-enable a provider after
+   * setting its key without restarting.
    */
   resetApi(apiName: string): void {
     const status = this.apiStatuses.get(apiName);
@@ -136,6 +153,7 @@ export class ApiManager {
       status.isHealthy = true;
       status.consecutiveFailures = 0;
       status.lastError = undefined;
+      status.disabled = false;
     }
   }
 }

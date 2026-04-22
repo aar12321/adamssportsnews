@@ -2,6 +2,10 @@ import type { SportId } from "@shared/schema";
 import type { TeamStats, PlayerStats } from "@shared/schema";
 
 const CACHE_TTL_MS = 15 * 60 * 1000;
+// Short TTL on empty results so a 404 (e.g. off-season NBA leaders) doesn't
+// retry on every request, but we still probe again every minute in case
+// ESPN is back.
+const NEGATIVE_TTL_MS = 60 * 1000;
 
 type CacheEntry<T> = { data: T; at: number };
 
@@ -32,6 +36,11 @@ const ESPN_CONFIG: Record<
 };
 
 let teamsCache: Partial<Record<SportId, CacheEntry<TeamStats[]>>> = {};
+
+// In-flight dedupe: if a fetch is already running for a sport, concurrent
+// callers share the same Promise instead of firing the ESPN API twice.
+const inflightTeams = new Map<SportId, Promise<TeamStats[]>>();
+const inflightLeaders = new Map<string, Promise<PlayerStats[]>>();
 let leadersCache: Partial<Record<SportId, CacheEntry<PlayerStats[]>>> = {};
 
 function safeNum(v: unknown, fallback = 0): number {
@@ -134,8 +143,22 @@ export class EspnSportsData {
     if (!cfg) return [];
 
     const cached = teamsCache[sport];
-    if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.data;
+    if (cached) {
+      const ttl = cached.data.length ? CACHE_TTL_MS : NEGATIVE_TTL_MS;
+      if (Date.now() - cached.at < ttl) return cached.data;
+    }
 
+    const pending = inflightTeams.get(sport);
+    if (pending) return pending;
+
+    const work = this._doFetchTeams(sport).finally(() => inflightTeams.delete(sport));
+    inflightTeams.set(sport, work);
+    return work;
+  }
+
+  private async _doFetchTeams(sport: SportId): Promise<TeamStats[]> {
+    const cfg = ESPN_CONFIG[sport];
+    if (!cfg) return [];
     try {
       const [teamsJson, standingsJson] = await Promise.all([
         fetchJson(cfg.teamsPath),
@@ -172,8 +195,13 @@ export class EspnSportsData {
 
       teamsCache[sport] = { data: out, at: Date.now() };
       return out;
-    } catch (e) {
-      console.error("espnSportsData.getTeamsForSport", sport, e);
+    } catch (e: any) {
+      // ESPN's public endpoints return 404 for out-of-season sports
+      // (e.g. NBA in June). Cache the empty result with a shorter TTL so
+      // we don't spam warnings or re-fetch on every request — analyst
+      // routes already fall back to local data.
+      console.warn(`[espn] getTeamsForSport(${sport}) failed: ${e?.message ?? e}`);
+      teamsCache[sport] = { data: [], at: Date.now() };
       return [];
     }
   }
@@ -184,10 +212,24 @@ export class EspnSportsData {
     if (!cfg) return [];
 
     const cached = leadersCache[sport];
-    if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
-      return cached.data.slice(0, limit);
+    if (cached) {
+      const ttl = cached.data.length ? CACHE_TTL_MS : NEGATIVE_TTL_MS;
+      if (Date.now() - cached.at < ttl) return cached.data.slice(0, limit);
     }
 
+    // Coalesce parallel callers onto a single upstream fetch.
+    const key = String(sport);
+    const pending = inflightLeaders.get(key);
+    if (pending) return pending.then(list => list.slice(0, limit));
+
+    const work = this._doFetchLeaders(sport).finally(() => inflightLeaders.delete(key));
+    inflightLeaders.set(key, work);
+    return work.then(list => list.slice(0, limit));
+  }
+
+  private async _doFetchLeaders(sport: SportId): Promise<PlayerStats[]> {
+    const cfg = ESPN_CONFIG[sport];
+    if (!cfg) return [];
     try {
       const data = await fetchJson(cfg.leadersPath);
       const out: PlayerStats[] = [];
@@ -222,14 +264,13 @@ export class EspnSportsData {
       }
 
       const dedup = new Map<string, PlayerStats>();
-      for (const p of out) {
-        if (!dedup.has(p.name)) dedup.set(p.name, p);
-      }
-      const list = Array.from(dedup.values()).slice(0, Math.max(limit, 60));
+      out.forEach(p => { if (!dedup.has(p.name)) dedup.set(p.name, p); });
+      const list = Array.from(dedup.values()).slice(0, 60);
       leadersCache[sport] = { data: list, at: Date.now() };
-      return list.slice(0, limit);
-    } catch (e) {
-      console.error("espnSportsData.getLeaderPlayers", sport, e);
+      return list;
+    } catch (e: any) {
+      console.warn(`[espn] getLeaderPlayers(${sport}) failed: ${e?.message ?? e}`);
+      leadersCache[sport] = { data: [], at: Date.now() };
       return [];
     }
   }

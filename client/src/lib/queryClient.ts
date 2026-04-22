@@ -79,7 +79,11 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
-      staleTime: 30 * 1000,
+      // Most of our data (schedules, rosters, mock stats) barely changes
+      // within a minute. A 60s default cuts in-app navigation refetches
+      // roughly in half while live-data queries still override with a
+      // shorter staleTime + refetchInterval where they need to.
+      staleTime: 60 * 1000,
       // Retry transient errors a couple times with backoff. We do NOT
       // retry 4xx responses because those are deterministic client errors.
       retry: (failureCount, error: any) => {

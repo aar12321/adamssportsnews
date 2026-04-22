@@ -72,9 +72,17 @@ export class NewsService {
     }
     
     this.cache = new Map();
-    
+
     // Register all APIs with the manager
     this.NEWS_API_PRIORITY.forEach(api => apiManager.registerApi(api));
+
+    // Pre-disable providers whose keys aren't configured so we don't
+    // round-trip through fetchFromApi only to throw "key not configured"
+    // on every single /api/news request. Saves ~300ms per request when
+    // a user hasn't set these.
+    if (!this.newsApiKey) apiManager.markUnavailable("newsapi", "key not configured");
+    if (!this.gnewsApiKey) apiManager.markUnavailable("gnews", "key not configured");
+    if (!this.apiFootballKey) apiManager.markUnavailable("apifootball", "key not configured");
   }
 
   /**

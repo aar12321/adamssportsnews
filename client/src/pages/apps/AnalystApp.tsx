@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { Suspense, lazy, useState, useMemo, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { APP_SPORTS, getUserAppSports } from "@shared/appSports";
 import { useUserPreferences } from "@/contexts/UserPreferencesContext";
@@ -10,7 +10,10 @@ import {
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from "recharts";
+
+// recharts is ~350kB gzipped+minified and only used for the Teams
+// overview chart, so we lazy-load it to keep the AnalystApp chunk small.
+const TeamsOverviewChart = lazy(() => import("@/components/analyst/TeamsOverviewChart"));
 
 function FormBadges({ form }: { form: string[] }) {
   return (
@@ -806,26 +809,16 @@ export default function AnalystApp() {
                 ))}
               </div>
 
-              {/* Teams overview bar chart */}
+              {/* Teams overview bar chart (lazy-loads recharts on demand) */}
               {chartData.length > 0 && (
-                <div className="glass-card p-5">
-                  <h3 className="font-bold text-foreground mb-4">
-                    {selectedSport === "soccer" ? "Goals vs. conceded (top clubs)" : "Offense vs. defense snapshot"}
-                  </h3>
-                  <ResponsiveContainer width="100%" height={240}>
-                    <BarChart data={chartData}>
-                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#888" }} />
-                      <YAxis tick={{ fontSize: 10, fill: "#888" }} domain={['auto', 'auto']} />
-                      <Tooltip
-                        contentStyle={{ background: "hsl(222 25% 12%)", border: "1px solid hsl(217 32% 20%)", borderRadius: "12px" }}
-                        labelStyle={{ color: "#fff", fontWeight: "bold" }}
-                      />
-                      <Legend />
-                      <Bar dataKey="For" fill="hsl(221 83% 62%)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="Against" fill="hsl(0 72% 51% / 0.6)" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <Suspense fallback={
+                  <div className="glass-card p-5"><Skeleton className="h-[272px] w-full rounded-xl" /></div>
+                }>
+                  <TeamsOverviewChart
+                    data={chartData}
+                    title={selectedSport === "soccer" ? "Goals vs. conceded (top clubs)" : "Offense vs. defense snapshot"}
+                  />
+                </Suspense>
               )}
 
               <div className="glass-card p-6 text-center">

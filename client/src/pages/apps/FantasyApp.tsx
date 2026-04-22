@@ -559,6 +559,7 @@ export default function FantasyApp() {
       const res = await fetch(`/api/fantasy/team/sample?sport=${selectedSport}`);
       return res.json();
     },
+    staleTime: 5 * 60_000,
   });
 
   const { data: topPlayers, isLoading: loadingPlayers } = useQuery({
@@ -576,6 +577,7 @@ export default function FantasyApp() {
       const res = await fetch(`/api/fantasy/waiver?sport=${selectedSport}`);
       return res.json();
     },
+    staleTime: 5 * 60_000,
   });
 
   const { data: injuredPlayers } = useQuery({

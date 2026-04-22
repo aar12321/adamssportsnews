@@ -851,15 +851,15 @@ export default function BettingApp() {
   const { data: account } = useQuery({
     queryKey: ["betting-account", userId],
     queryFn: () => fetchJson<any>(`/api/betting/account/${userId}`),
-    refetchInterval: 30000,
-    staleTime: 25000,
+    refetchInterval: 60_000,
+    staleTime: 55_000,
   });
 
   const { data: bets } = useQuery({
     queryKey: ["betting-bets", userId],
     queryFn: () => fetchJson<any[]>(`/api/betting/bets/${userId}`),
-    refetchInterval: 30000,
-    staleTime: 25000,
+    refetchInterval: 60_000,
+    staleTime: 55_000,
   });
 
   const { data: trending } = useQuery({

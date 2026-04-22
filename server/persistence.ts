@@ -103,12 +103,12 @@ export function scheduleSnapshot(name: string, get: () => unknown) {
 
 /** Synchronously flush anything pending. Called from shutdown hooks. */
 export function flushAll() {
-  for (const [name, timer] of pendingTimers) {
+  pendingTimers.forEach((timer, name) => {
     clearTimeout(timer);
     const get = pendingSnapshots.get(name);
     pendingSnapshots.delete(name);
     if (get) writeSync(name, get());
-  }
+  });
   pendingTimers.clear();
 }
 
