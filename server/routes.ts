@@ -11,6 +11,7 @@ import { userPreferencesService } from "./userPreferencesService";
 import { espnSportsData } from "./espnSportsData";
 import { sportIdSchema, type SportId } from "@shared/schema";
 import { requireSelf } from "./auth";
+import { explainMatchup, isClaudeEnabled } from "./claudeService";
 
 /** Parse and clamp a query-string integer to [min, max]; returns fallback for NaN. */
 function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
@@ -221,6 +222,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error analyzing game:", error);
       res.status(500).json({ error: "Failed to analyze game" });
     }
+  });
+
+  app.post("/api/betting/ai-commentary", async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const homeTeam = cleanText(body.homeTeam, 64);
+      const awayTeam = cleanText(body.awayTeam, 64);
+      const eventId = cleanText(body.eventId, 64);
+      if (!homeTeam || !awayTeam) {
+        return res.status(400).json({ error: "homeTeam and awayTeam are required" });
+      }
+      const { sport, error } = requireSport(body.sport);
+      if (error || !sport) return res.status(400).json({ error });
+      const analysis = await bettingService.analyzeGameWithOdds(homeTeam, awayTeam, sport, { eventId });
+      const result = await explainMatchup(analysis);
+      if (!result.ok) {
+        // Map "feature disabled" to 503 so the client can hide the UI
+        // affordance, vs genuine errors which come back as 502.
+        const status = result.reason.toLowerCase().includes("disabled") ? 503 : 502;
+        return res.status(status).json({ error: result.reason });
+      }
+      res.json({ text: result.text, model: result.model, cached: result.cached });
+    } catch (err) {
+      console.error("Error generating AI commentary:", err);
+      res.status(500).json({ error: "Failed to generate AI commentary" });
+    }
+  });
+
+  app.get("/api/ai/status", (_req, res) => {
+    res.json({ enabled: isClaudeEnabled() });
   });
 
   app.get("/api/betting/trending", (_req, res) => {

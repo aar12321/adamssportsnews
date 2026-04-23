@@ -88,6 +88,68 @@ const MemoizedAnalysisPanel = React.memo(AnalysisPanel);
 const MemoizedAccountCard = React.memo(AccountCard);
 const MemoizedBetHistoryList = React.memo(BetHistoryList);
 
+function AiCommentary({ analysis, gameHasStarted }: { analysis: any; gameHasStarted: boolean }) {
+  // Gate on the /api/ai/status probe so users never see a button that
+  // just errors. Cached in React Query so it only fires once per mount.
+  const { data: aiStatus } = useQuery({
+    queryKey: ["/api/ai/status"],
+    queryFn: () => fetchJson<{ enabled: boolean }>("/api/ai/status"),
+    staleTime: 5 * 60_000,
+  });
+  const [text, setText] = useState<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/betting/ai-commentary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          homeTeam: analysis.homeTeam,
+          awayTeam: analysis.awayTeam,
+          sport: analysis.sport,
+          eventId: analysis.eventId,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "AI commentary unavailable");
+      return data as { text: string };
+    },
+    onSuccess: (data) => setText(data.text),
+  });
+
+  // Hide entirely when AI isn't configured or the game has already started.
+  if (!aiStatus?.enabled || gameHasStarted) return null;
+
+  if (text) {
+    return (
+      <div className="p-3 bg-primary/5 border border-primary/20 rounded-xl space-y-2">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-primary uppercase tracking-wider">
+          <Zap className="w-3 h-3" /> AI take
+        </div>
+        <p className="text-sm text-foreground leading-relaxed">{text}</p>
+        <button
+          type="button"
+          onClick={() => { setText(null); mutation.reset(); }}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          Dismiss
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-primary/20 bg-primary/5 text-xs font-semibold text-primary hover:bg-primary/10 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+    >
+      <Zap className="w-3.5 h-3.5" />
+      {mutation.isPending ? "Thinking…" : mutation.isError ? "Retry AI take" : "Ask the AI for a take"}
+    </button>
+  );
+}
+
 type Pick =
   | { kind: "moneyline"; team: "home" | "away" }
   | { kind: "spread"; team: "home" | "away" }
@@ -361,6 +423,9 @@ function AnalysisPanel({ analysis, game, onPlaceBet, isPlacing }: { analysis: an
           <p className="text-[10px] text-muted-foreground/70 italic">{oddsLabel}</p>
         </div>
       </details>
+
+      {/* AI commentary — lazy, user-initiated so we don't pay tokens per view */}
+      <AiCommentary analysis={analysis} gameHasStarted={hasStarted} />
 
       {/* Step 2: Bet slip */}
       {!hasStarted && (

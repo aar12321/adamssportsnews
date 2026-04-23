@@ -267,6 +267,13 @@ function ComparisonView({ sport }: { sport: string }) {
             placeholder="Search team..."
             value={selectedTeam1 || team1Query}
             onChange={e => { setTeam1Query(e.target.value); setSelectedTeam1(null); }}
+            onKeyDown={e => {
+              if (e.key === "Enter" && filteredTeams1[0]) {
+                e.preventDefault();
+                setSelectedTeam1(filteredTeams1[0].name);
+                setTeam1Query(filteredTeams1[0].name);
+              }
+            }}
             className="input-field"
           />
           {team1Query && !selectedTeam1 && (
@@ -288,6 +295,13 @@ function ComparisonView({ sport }: { sport: string }) {
             placeholder="Search team..."
             value={selectedTeam2 || team2Query}
             onChange={e => { setTeam2Query(e.target.value); setSelectedTeam2(null); }}
+            onKeyDown={e => {
+              if (e.key === "Enter" && filteredTeams2[0]) {
+                e.preventDefault();
+                setSelectedTeam2(filteredTeams2[0].name);
+                setTeam2Query(filteredTeams2[0].name);
+              }
+            }}
             className="input-field"
           />
           {team2Query && !selectedTeam2 && (

@@ -119,6 +119,11 @@ app.use((req, res, next) => {
     warnings.push(
       "Fantasy rosters still live in the client's localStorage. A proper Postgres migration is the next step before multi-device sync."
     );
+    if (!process.env.ANTHROPIC_API_KEY) {
+      warnings.push(
+        "ANTHROPIC_API_KEY not set — AI commentary endpoints are disabled. The UI affordance hides itself when disabled, so this is fine for offline dev."
+      );
+    }
     if (warnings.length) {
       console.warn("\n[startup] readiness notes:");
       warnings.forEach(w => console.warn(`  - ${w}`));

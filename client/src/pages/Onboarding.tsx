@@ -151,6 +151,31 @@ export default function Onboarding() {
     }
   };
 
+  // Let Enter advance through the onboarding flow from any input. Skipped
+  // when the user has focus on a textarea (we don't have any, but keep
+  // the escape hatch) or when the current step can't proceed anyway.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      const target = e.target as HTMLElement | null;
+      if (target?.tagName === "TEXTAREA") return;
+      // Don't hijack Enter while the team search dropdown is up — the
+      // user may be about to click/tab-select a search result.
+      if (step === 2 && teamSearch.trim().length > 0) return;
+      if (!canProceed()) return;
+      e.preventDefault();
+      if (step < totalSteps - 1) {
+        setStep(s => s + 1);
+      } else if (!completing) {
+        handleComplete();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // canProceed / handleComplete close over everything that matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, displayName, selectedSports, selectedInterests, experience, teamSearch, completing]);
+
   const handleComplete = () => {
     if (completing) return;
     setCompleting(true);
