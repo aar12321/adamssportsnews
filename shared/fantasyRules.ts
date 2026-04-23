@@ -116,7 +116,12 @@ export function isFantasySportKey(s: unknown): s is FantasySportKey {
 export function normalizeFantasyPosition(raw: string | undefined, sport: string): string {
   if (!raw || !isFantasySportKey(sport)) return "";
   const aliases = POSITION_ALIASES[sport];
-  const token = raw.toUpperCase().split(/[\/,|]/)[0].trim();
+  // 1) Try the whole trimmed input first so multi-token aliases like
+  //    "D/ST" or "CENTER-BACK" can match verbatim before we tokenise.
+  const whole = raw.toUpperCase().trim();
+  if (whole && aliases[whole]) return aliases[whole];
+  // 2) Fall back to the first token (for inputs like "PG/SG" or "C,F").
+  const token = whole.split(/[\/,|]/)[0].trim();
   if (!token) return "";
   if (aliases[token]) return aliases[token];
   const canon = new Set(Object.values(aliases));
