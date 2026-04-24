@@ -53,7 +53,7 @@ export default function Apps() {
     <div className="animate-fade-in">
       <div className="relative mb-10 rounded-3xl border border-border/60 apps-hero-gradient px-6 py-8 md:px-10 md:py-10 overflow-hidden">
         <div className="relative z-[1] max-w-2xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary/90 mb-2">Sportsaurzo Pro</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary/90 mb-2">Adams Sports</p>
           <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground mb-2">
             One hub. <span className="gradient-text">Three engines.</span>
           </h1>
