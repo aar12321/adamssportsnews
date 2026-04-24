@@ -1,4 +1,5 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryCache, MutationCache } from "@tanstack/react-query";
+import { toast } from "@/hooks/use-toast";
 
 // AuthContext sets this whenever the Supabase session changes so that
 // every API request automatically carries the user's bearer token. Using
@@ -75,7 +76,72 @@ export async function fetchJson<T = any>(
   return apiRequest<T>("GET", url, undefined, opts);
 }
 
+/**
+ * Translate a thrown error into a one-line user-facing message.
+ * Errors here look like '404: Not Found' or 'Request timed out…'.
+ * Strip the HTTP code prefix so the toast reads naturally.
+ */
+function describeError(error: unknown): string {
+  if (!error) return "Something went wrong";
+  const raw = error instanceof Error ? error.message : String(error);
+  if (raw.includes("Request timed out")) return "Request timed out — check your connection.";
+  if (raw.toLowerCase().includes("failed to fetch")) return "Couldn't reach the server. Check your connection.";
+  // Strip leading '404: ' / '500: ' prefixes from apiRequest errors.
+  const stripped = raw.replace(/^\d{3}:\s*/, "");
+  // Truncate excessively long server payloads.
+  if (stripped.length > 240) return stripped.slice(0, 240) + "…";
+  return stripped || "Something went wrong";
+}
+
+// Background refetches (e.g. interval polls) shouldn't toast on every
+// failure or the user gets spammed when their wifi blips. Track the
+// most recent message-per-key + timestamp and rate-limit identical
+// toasts to one per 30 seconds.
+const RECENT_TOASTS = new Map<string, number>();
+function shouldToast(key: string): boolean {
+  const now = Date.now();
+  const last = RECENT_TOASTS.get(key) ?? 0;
+  if (now - last < 30_000) return false;
+  RECENT_TOASTS.set(key, now);
+  return true;
+}
+
 export const queryClient = new QueryClient({
+  // Cache-level error hooks fire once per failed query/mutation, AFTER
+  // any retries. Auth (401) errors are skipped because the fetch wrapper
+  // already kicks the user back to Login — a toast on top of that just
+  // adds noise mid-redirect.
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      const msg = describeError(error);
+      if (msg.includes("401")) return;
+      // Background refetch failures are usually transient; toast at most
+      // once per error message so a flaky API doesn't pile up banners.
+      const key = `q:${msg}`;
+      if (!shouldToast(key)) return;
+      // Only surface for visible queries — silent refetches against
+      // unmounted screens shouldn't bother the user.
+      if (query.getObserversCount() === 0) return;
+      toast({
+        title: "Couldn't load data",
+        description: msg,
+        variant: "destructive",
+      });
+    },
+  }),
+  mutationCache: new MutationCache({
+    onError: (error) => {
+      const msg = describeError(error);
+      if (msg.includes("401")) return;
+      const key = `m:${msg}`;
+      if (!shouldToast(key)) return;
+      toast({
+        title: "Action failed",
+        description: msg,
+        variant: "destructive",
+      });
+    },
+  }),
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
