@@ -4,7 +4,7 @@ import {
   Target, RotateCcw, ChevronLeft,
   BarChart2, Trophy, CheckCircle2, XCircle, Clock, AlertCircle, Flame, Search,
   Trash2, TrendingUp, TrendingDown, DollarSign, ArrowUpDown, ChevronUp, ChevronDown,
-  Calendar, Zap, Loader2, Info
+  Calendar, Zap, Loader2, Info, Download
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
@@ -632,9 +632,82 @@ function AccountCard({ account, onReset, isResetting }: { account: any; onReset:
   );
 }
 
+type BetFilter = "all" | "pending" | "won" | "lost";
+const BET_FILTER_KEY = "betting_history_filter_v1";
+
+/**
+ * Serialise the visible bets to a CSV the user can open in any
+ * spreadsheet for their own analysis. Quoting is RFC 4180 compliant
+ * (quotes doubled, fields containing commas/quotes/newlines wrapped).
+ */
+function downloadBetsCsv(bets: any[], scope: BetFilter) {
+  if (bets.length === 0) return;
+  const escape = (v: unknown) => {
+    if (v == null) return "";
+    const s = String(v);
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const cols = [
+    "placedAt", "settledAt", "sport", "league", "matchup", "betType",
+    "selection", "stake", "odds", "winProbability", "potentialPayout",
+    "status", "profit", "result",
+  ];
+  const rows = bets.map(b => {
+    const profit = b.status === "won"
+      ? (b.potentialPayout - b.amount)
+      : b.status === "lost"
+        ? -b.amount
+        : 0;
+    return [
+      b.placedAt ?? "",
+      b.settledAt ?? "",
+      b.sport ?? "",
+      b.league ?? "",
+      `${b.awayTeam ?? ""} @ ${b.homeTeam ?? ""}`,
+      b.betType ?? "",
+      b.selectedTeam ?? (b.isOver === true ? "over" : b.isOver === false ? "under" : ""),
+      b.amount ?? 0,
+      b.odds ?? 0,
+      b.winProbability != null ? Number(b.winProbability).toFixed(3) : "",
+      b.potentialPayout ?? 0,
+      b.status ?? "",
+      profit.toFixed(2),
+      b.result ?? "",
+    ].map(escape).join(",");
+  });
+  const csv = [cols.join(","), ...rows].join("\r\n");
+  // Lead the file with a UTF-8 BOM so Excel keeps non-ASCII team names
+  // (and the rare em-dash) intact instead of mangling them to mojibake.
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const date = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `bets-${scope}-${date}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function BetHistoryList({ bets, onCancel, cancellingBetId }: { bets: any[]; onCancel?: (betId: string) => void; cancellingBetId?: string | null }) {
   const [showAll, setShowAll] = useState(false);
-  const [filter, setFilter] = useState<"all" | "pending" | "won" | "lost">("all");
+  // Restore the last picked filter so a refresh / app-switch doesn't
+  // dump the user back on 'All' every time. Persisted globally — bet
+  // data is already per-user and the filter is just a view choice.
+  const [filter, setFilterRaw] = useState<BetFilter>(() => {
+    try {
+      const stored = localStorage.getItem(BET_FILTER_KEY) as BetFilter | null;
+      if (stored === "all" || stored === "pending" || stored === "won" || stored === "lost") return stored;
+    } catch { /* ignore */ }
+    return "all";
+  });
+  const setFilter = (f: BetFilter) => {
+    setFilterRaw(f);
+    setShowAll(false);
+    try { localStorage.setItem(BET_FILTER_KEY, f); } catch { /* quota — ignore */ }
+  };
 
   if (bets.length === 0) {
     return (
@@ -692,22 +765,34 @@ function BetHistoryList({ bets, onCancel, cancellingBetId }: { bets: any[]; onCa
         </div>
       </div>
 
-      {/* Filter tabs */}
-      <div className="tab-bar">
-        {[
-          { key: "all", label: `All (${bets.length})` },
-          { key: "pending", label: `Pending (${pending.length})` },
-          { key: "won", label: `Won (${won.length})` },
-          { key: "lost", label: `Lost (${lost.length})` },
-        ].map(({ key, label }) => (
-          <button
-            key={key}
-            className={cn("tab-item text-xs", filter === key && "active")}
-            onClick={() => { setFilter(key as typeof filter); setShowAll(false); }}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Filter tabs + export */}
+      <div className="flex items-center gap-2">
+        <div className="tab-bar flex-1">
+          {[
+            { key: "all", label: `All (${bets.length})` },
+            { key: "pending", label: `Pending (${pending.length})` },
+            { key: "won", label: `Won (${won.length})` },
+            { key: "lost", label: `Lost (${lost.length})` },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              className={cn("tab-item text-xs", filter === key && "active")}
+              onClick={() => setFilter(key as BetFilter)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => downloadBetsCsv(filteredBets, filter)}
+          disabled={filteredBets.length === 0}
+          title="Download these bets as CSV"
+          aria-label="Download bets as CSV"
+          className="flex-shrink-0 h-9 px-3 rounded-lg border border-border bg-muted/50 hover:bg-muted text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+        >
+          <Download className="w-3.5 h-3.5" /> Export
+        </button>
       </div>
 
       {/* Bet list */}
