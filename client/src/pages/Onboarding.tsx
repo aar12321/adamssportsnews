@@ -90,6 +90,48 @@ export default function Onboarding() {
 
   const totalSteps = 5;
 
+  // Persist in-progress onboarding state to localStorage so a refresh,
+  // accidental tab close, or session-init flicker doesn't make the user
+  // re-pick everything. Keyed per-user so a shared device doesn't leak
+  // selections between accounts.
+  const draftKey = `onboarding_draft_${user?.id || "anon"}`;
+
+  // Hydrate from any prior draft once on mount. Wrapped in try/catch
+  // because a corrupted entry shouldn't keep the user out of the flow.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as Partial<{
+        step: number;
+        displayName: string;
+        selectedSports: SportId[];
+        selectedTeams: string[];
+        selectedInterests: string[];
+        experience: string;
+      }>;
+      if (typeof draft.step === "number" && draft.step >= 0 && draft.step < totalSteps) setStep(draft.step);
+      if (typeof draft.displayName === "string" && draft.displayName.trim()) setDisplayName(draft.displayName);
+      if (Array.isArray(draft.selectedSports)) setSelectedSports(draft.selectedSports);
+      if (Array.isArray(draft.selectedTeams)) setSelectedTeams(draft.selectedTeams);
+      if (Array.isArray(draft.selectedInterests)) setSelectedInterests(draft.selectedInterests);
+      if (typeof draft.experience === "string") setExperience(draft.experience);
+    } catch { /* ignore corrupt draft */ }
+    // Only ever runs once for a given user — `draftKey` won't change
+    // mid-session because the user object is stable while signed in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+
+  // Write the draft on every change. Cheap (one localStorage write) and
+  // bounded (state values are small), so no debounce needed.
+  useEffect(() => {
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({
+        step, displayName, selectedSports, selectedTeams, selectedInterests, experience,
+      }));
+    } catch { /* quota exceeded / private mode — silently skip */ }
+  }, [draftKey, step, displayName, selectedSports, selectedTeams, selectedInterests, experience]);
+
   // Search teams across all selected sports
   const searchableTeams = useMemo(() => {
     const teams: { name: string; sport: SportId; sportLabel: string }[] = [];
@@ -151,6 +193,19 @@ export default function Onboarding() {
     }
   };
 
+  // Surfaced under the disabled Continue button so the user knows
+  // what they have to do, instead of staring at a greyed-out CTA.
+  const proceedHint = (): string | null => {
+    if (canProceed()) return null;
+    switch (step) {
+      case 0: return "Enter a name to continue";
+      case 1: return "Pick at least one sport to continue";
+      case 3: return "Choose what you want to do — pick at least one";
+      case 4: return "Tell us how into sports you are to continue";
+      default: return null;
+    }
+  };
+
   // Let Enter advance through the onboarding flow from any input. Skipped
   // when the user has focus on a textarea (we don't have any, but keep
   // the escape hatch) or when the current step can't proceed anyway.
@@ -208,6 +263,7 @@ export default function Onboarding() {
     try {
       localStorage.setItem(`onboarding_complete_${user?.id || "default"}`, "true");
       localStorage.setItem("onboarding_complete", "true");
+      localStorage.removeItem(draftKey);
     } catch {}
     setIsNewUser(false);
   };
@@ -229,6 +285,7 @@ export default function Onboarding() {
     try {
       localStorage.setItem(`onboarding_complete_${user?.id || "default"}`, "true");
       localStorage.setItem("onboarding_complete", "true");
+      localStorage.removeItem(draftKey);
     } catch {}
     setIsNewUser(false);
   };
@@ -484,8 +541,16 @@ export default function Onboarding() {
           </div>
         )}
 
+        {/* Helper text — explains why the Continue/Get Started button
+            is disabled so the user knows what's left to do. */}
+        {proceedHint() && (
+          <p className="mt-6 text-center text-xs text-muted-foreground" role="status">
+            {proceedHint()}
+          </p>
+        )}
+
         {/* Navigation */}
-        <div className="flex items-center justify-between mt-8">
+        <div className={cn("flex items-center justify-between", proceedHint() ? "mt-3" : "mt-8")}>
           <button
             onClick={() => setStep(s => s - 1)}
             disabled={step === 0 || completing}
