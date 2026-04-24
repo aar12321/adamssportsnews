@@ -511,14 +511,43 @@ function PlayerDetail({ player }: { player: any }) {
   );
 }
 
+type AnalystTab = "teams" | "compare" | "players";
+
+// Per-tab/per-sport choice persists across page reloads and tab
+// switches inside the app. Stored under a single key so wiping it is
+// trivial. Not user-scoped — Analyst doesn't show user data, so a
+// shared device's tab preference doesn't leak anything sensitive.
+const FILTER_KEY = "analyst_filters_v1";
+function readFilters(): { tab?: AnalystTab; sport?: string } {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return { tab: parsed?.tab, sport: parsed?.sport };
+  } catch { return {}; }
+}
+
 export default function AnalystApp() {
   const { preferences } = useUserPreferences();
   const userSports = useMemo(() => getUserAppSports(preferences.favoriteSports), [preferences.favoriteSports]);
-  const [selectedSport, setSelectedSport] = useState(userSports[0]?.id || "basketball");
-  const [activeTab, setActiveTab] = useState<"teams" | "compare" | "players">("teams");
+  const stored = useMemo(readFilters, []);
+  const [selectedSport, setSelectedSport] = useState(() => {
+    // Prefer the persisted sport, but only if the user still follows it.
+    if (stored.sport && userSports.some(s => s.id === stored.sport)) return stored.sport;
+    return userSports[0]?.id || "basketball";
+  });
+  const [activeTab, setActiveTab] = useState<AnalystTab>(stored.tab ?? "teams");
   const [selectedTeam, setSelectedTeam] = useState<any>(null);
   const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Write back on every change so a refresh / re-open lands you on the
+  // same tab + sport you were last looking at.
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTER_KEY, JSON.stringify({ tab: activeTab, sport: selectedSport }));
+    } catch { /* quota / private mode — silently skip */ }
+  }, [activeTab, selectedSport]);
   // 150ms feels instant on a fast connection but still coalesces bursts
   // of keystrokes into one fetch. 300 was perceptibly laggy.
   const debouncedSearch = useDebouncedValue(searchQuery, 150);
