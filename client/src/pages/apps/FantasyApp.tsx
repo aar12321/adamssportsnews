@@ -362,6 +362,50 @@ function PlayerCard({ player, compact = false, onAdd, onRemove, isOnRoster, onSe
   );
 }
 
+/**
+ * One column of the trade breakdown — either "You give" or "You get".
+ * Sums the players' avg points so the user sees the math behind the
+ * verdict without paging through each card.
+ */
+function TradeSide({ label, tone, players }: { label: string; tone: "gain" | "loss"; players: any[] }) {
+  const total = players.reduce((acc: number, p: any) => acc + (Number(p.averagePoints) || 0), 0);
+  const isGain = tone === "gain";
+  return (
+    <div className={cn(
+      "p-3 rounded-xl border space-y-2",
+      isGain ? "bg-green-500/5 border-green-500/15" : "bg-red-500/5 border-red-500/15"
+    )}>
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+        <p className={cn("text-sm font-bold num", isGain ? "text-green-400" : "text-red-400")}>
+          {total.toFixed(1)}
+          <span className="text-[10px] font-normal text-muted-foreground ml-0.5">pts/wk</span>
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        {players.length === 0 ? (
+          <p className="text-xs text-muted-foreground">—</p>
+        ) : players.map((p: any) => (
+          <div key={p.id} className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-foreground truncate">{p.name}</p>
+              <p className="text-[10px] text-muted-foreground truncate">
+                {p.position}
+                {p.status && p.status !== "active" && (
+                  <span className="text-orange-400 ml-1">· {p.status}</span>
+                )}
+              </p>
+            </div>
+            <p className="text-xs font-semibold text-foreground num flex-shrink-0">
+              {p.averagePoints != null ? Number(p.averagePoints).toFixed(1) : "—"}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function TradeAnalyzer({ sportKey }: { sportKey: string }) {
   const [givingIds, setGivingIds] = useState<string[]>([]);
   const [receivingIds, setReceivingIds] = useState<string[]>([]);
@@ -482,6 +526,7 @@ function TradeAnalyzer({ sportKey }: { sportKey: string }) {
             </div>
           ) : analysis ? (
             <div className="space-y-3">
+              {/* Headline verdict */}
               <div className={cn(
                 "p-4 rounded-xl border text-center",
                 analysis.recommendation === "accept" ? "bg-green-500/10 border-green-500/20" :
@@ -497,14 +542,55 @@ function TradeAnalyzer({ sportKey }: { sportKey: string }) {
                    analysis.recommendation === "decline" ? "✗ Decline Trade" :
                    "~ Neutral Trade"}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="text-xs text-muted-foreground mt-1 num">
                   {analysis.valueDifference > 0 ? "+" : ""}{analysis.valueDifference.toFixed(1)} pts/wk net gain
                 </p>
               </div>
+
+              {/* Side-by-side player breakdown so the user can audit
+                  the verdict instead of taking it on faith. */}
+              <div className="grid grid-cols-2 gap-2">
+                <TradeSide
+                  label="You give"
+                  tone="loss"
+                  players={analysis.givingPlayers || []}
+                />
+                <TradeSide
+                  label="You get"
+                  tone="gain"
+                  players={analysis.receivingPlayers || []}
+                />
+              </div>
+
               <p className="text-sm text-muted-foreground leading-relaxed">{analysis.analysis}</p>
-              {analysis.factors?.map((f: string, i: number) => (
-                <p key={i} className="text-xs text-muted-foreground border-l-2 border-primary/30 pl-2">{f}</p>
-              ))}
+
+              {/* Reasoning chips — each factor coloured by sentiment so
+                  the user can tell at a glance which way it cuts. */}
+              {analysis.factors?.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-foreground uppercase tracking-wider">Why this verdict</p>
+                  {analysis.factors.map((f: string, i: number) => {
+                    const lower = f.toLowerCase();
+                    const isWarning = lower.includes("injured") || lower.includes("risk") || lower.includes("trending down");
+                    const isPositive = lower.includes("trending up") || lower.includes("selling high") || lower.includes("good time");
+                    return (
+                      <div
+                        key={i}
+                        className={cn(
+                          "flex items-start gap-2 p-2 rounded-lg border text-xs",
+                          isWarning ? "bg-orange-500/10 border-orange-500/20 text-orange-300" :
+                          isPositive ? "bg-green-500/10 border-green-500/20 text-green-300" :
+                          "bg-muted/30 border-border text-muted-foreground"
+                        )}
+                      >
+                        <span className="mt-0.5">{isWarning ? "⚠" : isPositive ? "↗" : "•"}</span>
+                        <span className="flex-1 leading-snug">{f}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               <button onClick={() => { setStep("giving"); setGivingIds([]); setReceivingIds([]); }} className="btn-ghost w-full">
                 New Analysis
               </button>
