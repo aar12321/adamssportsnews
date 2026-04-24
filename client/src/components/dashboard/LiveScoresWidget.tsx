@@ -114,7 +114,7 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
     }
   }, [displaySports, selectedSport]);
 
-  const { data, isLoading, isError, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ["/api/scores", selectedSport],
     queryFn: async () => {
       const url = selectedSport === "all" ? "/api/scores" : `/api/scores?sport=${selectedSport}`;
@@ -128,11 +128,31 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
   const scores: Score[] = data?.scores || [];
   const liveCount = scores.filter(s => s.status === "live").length;
 
+  // Tick once a second so the "Updated Xs ago" caption stays accurate
+  // without re-fetching. The query itself only re-runs every 60s.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (!dataUpdatedAt) return;
+    const id = setInterval(() => forceTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [dataUpdatedAt]);
+
+  const updatedLabel = (() => {
+    if (!dataUpdatedAt) return null;
+    const seconds = Math.max(0, Math.floor((Date.now() - dataUpdatedAt) / 1000));
+    if (seconds < 5) return "just now";
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
+  })();
+
   return (
     <div className="space-y-4">
       {/* Widget header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <h2 className="font-bold text-foreground">Live Scores</h2>
           {liveCount > 0 && (
             <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/10 border border-green-500/20 rounded-full">
@@ -141,14 +161,26 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
             </span>
           )}
         </div>
-        <button
-          onClick={() => refetch()}
-          className={cn("w-7 h-7 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all",
-            isFetching && "animate-spin"
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {updatedLabel && (
+            <span
+              className="text-[11px] text-muted-foreground tabular-nums"
+              title={`Last updated ${new Date(dataUpdatedAt).toLocaleTimeString()}`}
+            >
+              {isFetching ? "Refreshing…" : `Updated ${updatedLabel}`}
+            </span>
           )}
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-        </button>
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            aria-label="Refresh scores"
+            className={cn(
+              "w-7 h-7 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            )}
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} />
+          </button>
+        </div>
       </div>
 
       {/* Sport filter */}
