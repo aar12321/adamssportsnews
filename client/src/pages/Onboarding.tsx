@@ -388,6 +388,16 @@ export default function Onboarding() {
               <p className="text-sm text-muted-foreground mt-1">Search any team or skip this step</p>
             </div>
 
+            {/* Why-it-matters nudge — step 2 is fully skippable, but
+                without it the personalisation everywhere else is bland.
+                Tell the user what they unlock so they don't auto-skip. */}
+            <div className="flex items-start gap-3 p-3 bg-primary/5 border border-primary/20 rounded-xl">
+              <span className="text-base leading-none mt-0.5">⭐</span>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Adding teams floats their games to the top of the Betting schedule, surfaces them on your dashboard, and pre-fills Analyst comparisons. You can edit this anytime from <span className="text-foreground font-medium">Profile</span>.
+              </p>
+            </div>
+
             {/* Search bar */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
