@@ -59,7 +59,7 @@ export default function NewsFeed({ categories, count, sports }: NewsFeedProps) {
 
   const sportQuery = activeSport !== "all" ? activeSport : undefined;
 
-  const { data, isLoading, isError, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useQuery({
     // Include the active sport so different chips don't collide in cache.
     queryKey: ["/api/news", sportQuery ?? "all"],
     queryFn: async () => {
@@ -69,6 +69,26 @@ export default function NewsFeed({ categories, count, sports }: NewsFeedProps) {
     refetchInterval: 5 * 60 * 1000, // 5 min
     placeholderData: (prev) => prev,
   });
+
+  // Tick a bit slower than the scores widget — news refreshes every 5
+  // minutes so per-second precision would just spin the CPU for nothing.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (!dataUpdatedAt) return;
+    const id = setInterval(() => forceTick(t => t + 1), 15_000);
+    return () => clearInterval(id);
+  }, [dataUpdatedAt]);
+
+  const updatedLabel = (() => {
+    if (!dataUpdatedAt) return null;
+    const seconds = Math.max(0, Math.floor((Date.now() - dataUpdatedAt) / 1000));
+    if (seconds < 30) return "just now";
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
+  })();
 
   const processedArticles = useMemo(() => {
     if (!data?.articles) return [];
@@ -116,11 +136,21 @@ export default function NewsFeed({ categories, count, sports }: NewsFeedProps) {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h2 className="font-bold text-foreground">News Feed</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {updatedLabel && (
+            <span
+              className="text-[11px] text-muted-foreground tabular-nums hidden sm:inline"
+              title={`Last updated ${new Date(dataUpdatedAt).toLocaleTimeString()}`}
+            >
+              {isFetching ? "Refreshing…" : `Updated ${updatedLabel}`}
+            </span>
+          )}
           <button
             onClick={() => setShowSearch(!showSearch)}
+            aria-label={showSearch ? "Hide search" : "Search news"}
+            aria-pressed={showSearch}
             className={cn(
               "w-7 h-7 rounded-lg flex items-center justify-center transition-all",
               showSearch ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
@@ -130,11 +160,11 @@ export default function NewsFeed({ categories, count, sports }: NewsFeedProps) {
           </button>
           <button
             onClick={() => refetch()}
-            className={cn("w-7 h-7 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all",
-              isFetching && "animate-spin"
-            )}
+            disabled={isFetching}
+            aria-label="Refresh news"
+            className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} />
           </button>
         </div>
       </div>
