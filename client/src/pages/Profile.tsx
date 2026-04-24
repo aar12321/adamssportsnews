@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   User, Palette, Bell, LayoutDashboard, Trophy, Target, Smartphone,
   Monitor, Sun, Moon, Laptop, ChevronRight, Check, RotateCcw, Loader2, CloudOff,
   Shield, Activity, AlertCircle, DollarSign, Users, BarChart3, LogOut, Mail,
-  Plus, X
+  Plus, X, Camera
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
@@ -125,6 +125,40 @@ function SaveStatusBadge({ status, lastSavedAt }: { status: "idle" | "pending" |
   );
 }
 
+/**
+ * Resize an image File down to a square thumbnail and return a JPEG
+ * data URL. Caps storage at ~256x256 / 0.85 quality so even a 4 MB
+ * upload fits in ~10 KB inside user prefs (which sync to the server
+ * over JSON). Centred crop keeps faces in frame for off-square photos.
+ */
+async function fileToAvatarDataUrl(file: File, max = 256, quality = 0.85): Promise<string> {
+  if (!file.type.startsWith("image/")) throw new Error("Pick an image file (PNG, JPG, GIF, etc.).");
+  if (file.size > 8 * 1024 * 1024) throw new Error("That image is over 8 MB. Pick a smaller one.");
+
+  const imageUrl = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error("Couldn't decode that image."));
+      i.src = imageUrl;
+    });
+    const side = Math.min(img.width, img.height);
+    const sx = (img.width - side) / 2;
+    const sy = (img.height - side) / 2;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = max;
+    canvas.height = max;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Browser doesn't support canvas — can't resize avatar.");
+    ctx.drawImage(img, sx, sy, side, side, 0, 0, max, max);
+    return canvas.toDataURL("image/jpeg", quality);
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
 function SportBadge({ sport, selected, onClick }: { sport: typeof SPORTS[0]; selected: boolean; onClick: () => void }) {
   return (
     <button
@@ -154,6 +188,31 @@ export default function Profile() {
   const { user, signOut } = useAuth();
   const [activeSection, setActiveSection] = useState("account");
   const [newTeam, setNewTeam] = useState("");
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleAvatarPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset the file input so the same file can be re-picked after a remove.
+    if (e.target) e.target.value = "";
+    if (!file) return;
+    setAvatarError(null);
+    setAvatarBusy(true);
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      updatePreferences({ avatar: dataUrl });
+    } catch (err: any) {
+      setAvatarError(err?.message ?? "Couldn't process that image.");
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const handleAvatarRemove = () => {
+    setAvatarError(null);
+    updatePreferences({ avatar: undefined });
+  };
 
   const handleReset = () => {
     if (typeof window !== "undefined" && !window.confirm(
@@ -267,11 +326,57 @@ export default function Profile() {
           <div className="glass-card p-2 sticky top-8">
             {/* Avatar */}
             <div className="flex flex-col items-center p-4 mb-2">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center mb-3">
-                <User className="w-8 h-8 text-white" />
-              </div>
+              {/* Avatar with hover-to-change overlay. Clicking anywhere
+                  on the tile opens the file picker; the small Remove
+                  button (only when an avatar is set) clears it. */}
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={avatarBusy}
+                aria-label={preferences.avatar ? "Change profile photo" : "Upload profile photo"}
+                className="group relative w-16 h-16 rounded-2xl mb-3 overflow-hidden focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+              >
+                {preferences.avatar ? (
+                  <img
+                    src={preferences.avatar}
+                    alt={preferences.displayName}
+                    className="w-full h-full object-cover"
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center">
+                    <User className="w-8 h-8 text-white" />
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity flex items-center justify-center">
+                  {avatarBusy
+                    ? <Loader2 className="w-5 h-5 text-white animate-spin" />
+                    : <Camera className="w-5 h-5 text-white" />}
+                </div>
+              </button>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                onChange={handleAvatarPick}
+              />
               <p className="font-bold text-foreground">{preferences.displayName}</p>
               <p className="text-xs text-muted-foreground truncate max-w-full">{user?.email || "Member"}</p>
+              {preferences.avatar && (
+                <button
+                  type="button"
+                  onClick={handleAvatarRemove}
+                  className="mt-2 text-[11px] text-muted-foreground hover:text-destructive transition-colors"
+                >
+                  Remove photo
+                </button>
+              )}
+              {avatarError && (
+                <p className="mt-2 text-[11px] text-destructive text-center" role="alert">
+                  {avatarError}
+                </p>
+              )}
             </div>
 
             <nav className="space-y-0.5">
