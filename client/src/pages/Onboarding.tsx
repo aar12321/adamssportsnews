@@ -48,6 +48,9 @@ const PREFS_STORAGE_KEY = "aurzo.sports.prefs";
 interface OnboardingAnswers {
   leagues: string[];
   news_style: string;
+  // Index signature so the object can be passed to RPC wrappers that
+  // accept `Record<string, unknown>` without an explicit cast.
+  [key: string]: unknown;
 }
 
 export default function Onboarding() {
