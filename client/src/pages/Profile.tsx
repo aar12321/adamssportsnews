@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import {
   User, Palette, Bell, LayoutDashboard, Trophy, Target, Smartphone,
-  Monitor, Sun, Moon, ChevronRight, Check, Save, RotateCcw,
+  Monitor, Sun, Moon, Laptop, ChevronRight, Check, Save, RotateCcw,
   Shield, Activity, AlertCircle, DollarSign, Users, BarChart3, LogOut, Mail,
   Plus, X
 } from "lucide-react";
@@ -87,7 +87,7 @@ function SportBadge({ sport, selected, onClick }: { sport: typeof SPORTS[0]; sel
 
 export default function Profile() {
   const { preferences, updatePreferences, updateDashboardLayout, updateNotifications, updateBettingPrefs, resetPreferences } = useUserPreferences();
-  const { theme, setTheme } = useTheme();
+  const { themeChoice, setThemeChoice } = useTheme();
   const { viewMode, setViewMode } = useViewMode();
   const { user, signOut } = useAuth();
   const [saved, setSaved] = useState(false);
@@ -370,22 +370,23 @@ export default function Profile() {
               <div className="space-y-5">
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 block">Theme</label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     {[
-                      { key: "dark", label: "Dark Mode", icon: Moon, desc: "Easy on the eyes" },
-                      { key: "light", label: "Light Mode", icon: Sun, desc: "Classic look" },
+                      { key: "dark", label: "Dark", icon: Moon, desc: "Easy on the eyes" },
+                      { key: "light", label: "Light", icon: Sun, desc: "Classic look" },
+                      { key: "auto", label: "Auto", icon: Laptop, desc: "Match your system" },
                     ].map(({ key, label, icon: Icon, desc }) => (
                       <button
                         key={key}
-                        onClick={() => setTheme(key as "dark" | "light")}
+                        onClick={() => setThemeChoice(key as "dark" | "light" | "auto")}
                         className={cn(
                           "p-4 rounded-xl border transition-all text-left",
-                          theme === key
+                          themeChoice === key
                             ? "bg-primary/15 border-primary/40"
                             : "bg-muted/30 border-border hover:border-primary/30"
                         )}
                       >
-                        <Icon className={cn("w-5 h-5 mb-2", theme === key ? "text-primary" : "text-muted-foreground")} />
+                        <Icon className={cn("w-5 h-5 mb-2", themeChoice === key ? "text-primary" : "text-muted-foreground")} />
                         <p className="text-sm font-semibold text-foreground">{label}</p>
                         <p className="text-xs text-muted-foreground">{desc}</p>
                       </button>
