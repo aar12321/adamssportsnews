@@ -5,6 +5,23 @@ interface State {
 }
 
 /**
+ * Pluggable reporter — register one of these (e.g. from a Sentry init
+ * shim) to forward unhandled render errors to your tracker. Default is
+ * a no-op so dev / OSS builds don't ship a hard dependency.
+ *
+ * Example wiring (in main.tsx):
+ *   import * as Sentry from "@sentry/react";
+ *   setErrorReporter((err, info) => Sentry.captureException(err, {
+ *     contexts: { react: { componentStack: info.componentStack } },
+ *   }));
+ */
+type ErrorReporter = (error: Error, info: React.ErrorInfo) => void;
+let reporter: ErrorReporter | null = null;
+export function setErrorReporter(fn: ErrorReporter | null) {
+  reporter = fn;
+}
+
+/**
  * Top-level boundary so an unhandled render error becomes a recoverable
  * screen with a retry button, rather than a white page. Intentionally
  * scoped to the whole tree — any in-app re-navigation stays inside the
@@ -21,9 +38,15 @@ export default class AppErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Surface to console so it shows up in production logs; a real app
-    // would forward to Sentry / Datadog here.
+    // Surface to console so it shows up in production logs.
     console.error("[AppErrorBoundary]", error, info.componentStack);
+    // Forward to whatever reporter the host wired up. Wrapped so a
+    // crashing reporter can't tear down the boundary's own render.
+    if (reporter) {
+      try { reporter(error, info); } catch (e) {
+        console.warn("[AppErrorBoundary] reporter threw:", e);
+      }
+    }
   }
 
   handleReset = () => {
