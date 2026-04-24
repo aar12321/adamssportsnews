@@ -539,19 +539,23 @@ export default function FantasyApp() {
     return SPORT_CONFIG[selectedSport]?.positions.length ?? 0;
   }, [selectedSport]);
 
-  // Auto-clear add error after 4 seconds
-  useEffect(() => {
-    if (lastError) {
-      const t = setTimeout(clearError, 4000);
-      return () => clearTimeout(t);
-    }
-  }, [lastError, clearError]);
+  // Errors stick until the user dismisses them. We tried auto-clearing
+  // after 4 seconds and lost half the failed-add messages — users were
+  // mid-scroll when the banner faded out and missed the "duplicate
+  // player" feedback. The banner already has its own X button, so the
+  // user is in control of when it goes away.
 
   useEffect(() => {
     if (!userSports.some(s => s.id === selectedSport)) {
       setSelectedSport(userSports[0]?.id || "basketball");
     }
   }, [userSports, selectedSport]);
+
+  // When the user changes sports, drop any stale roster error from the
+  // previous sport — the message only made sense in that context.
+  useEffect(() => {
+    clearError();
+  }, [selectedSport, clearError]);
 
   const { data: team } = useQuery({
     queryKey: ["/api/fantasy/team/sample", selectedSport],
