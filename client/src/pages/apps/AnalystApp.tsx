@@ -5,7 +5,7 @@ import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   BarChart3, ChevronLeft, Search, TrendingUp, Users, ArrowLeftRight,
-  Trophy, Activity, Target, Star, Flame, ChevronRight, Award
+  Trophy, Activity, Target, Star, Flame, ChevronRight, Award, Loader2
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
@@ -519,7 +519,11 @@ export default function AnalystApp() {
   const [selectedTeam, setSelectedTeam] = useState<any>(null);
   const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const debouncedSearch = useDebouncedValue(searchQuery, 300);
+  // 150ms feels instant on a fast connection but still coalesces bursts
+  // of keystrokes into one fetch. 300 was perceptibly laggy.
+  const debouncedSearch = useDebouncedValue(searchQuery, 150);
+  const isDebouncing =
+    searchQuery.trim() !== debouncedSearch.trim() && searchQuery.trim().length > 0;
 
   useEffect(() => {
     if (!userSports.some(s => s.id === selectedSport)) {
@@ -746,7 +750,21 @@ export default function AnalystApp() {
                   </div>
                 </button>
               ))}
-              {(!players || players.length === 0) && !loadingPlayers && debouncedSearch.trim().length > 0 && (
+              {/* Empty-state cues so the player tab never just sits silently. */}
+              {searchQuery.trim().length === 0 && !loadingPlayers && (
+                <div className="glass-card p-6 text-center space-y-1">
+                  <Search className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Search players by name</p>
+                  <p className="text-xs text-muted-foreground/80">Type at least two letters to look up stats, status, and recent form.</p>
+                </div>
+              )}
+              {isDebouncing && (
+                <div className="glass-card p-6 text-center space-y-1">
+                  <Loader2 className="w-6 h-6 text-muted-foreground mx-auto mb-2 animate-spin" />
+                  <p className="text-sm text-muted-foreground">Looking for &ldquo;{searchQuery.trim()}&rdquo;…</p>
+                </div>
+              )}
+              {(!players || players.length === 0) && !loadingPlayers && !isDebouncing && debouncedSearch.trim().length > 0 && (
                 <div className="glass-card p-6 text-center space-y-1">
                   <Users className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                   <p className="text-sm text-muted-foreground">No players match &ldquo;{debouncedSearch}&rdquo;</p>
