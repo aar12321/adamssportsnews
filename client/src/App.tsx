@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -16,9 +16,16 @@ import AnalystApp from "@/pages/apps/AnalystApp";
 import Profile from "@/pages/Profile";
 import Login from "@/pages/Login";
 import Onboarding from "@/pages/Onboarding";
+import AurzoSettingsPage from "@/pages/AurzoSettingsPage";
+import AurzoAuthGate from "@/lib/aurzo/AurzoAuthGate";
 import { Loader2 } from "lucide-react";
 
-function Router() {
+/**
+ * Routes that live inside the authenticated shell (MainLayout + nav).
+ * Everything in here assumes a valid session and platform access, which
+ * AurzoAuthGate enforces one level up.
+ */
+function AuthedRoutes() {
   return (
     <MainLayout>
       <Switch>
@@ -28,14 +35,23 @@ function Router() {
         <Route path="/apps/fantasy" component={FantasyApp} />
         <Route path="/apps/analyst" component={AnalystApp} />
         <Route path="/profile" component={Profile} />
+        <Route path="/settings" component={AurzoSettingsPage} />
         <Route component={Dashboard} />
       </Switch>
     </MainLayout>
   );
 }
 
-function AuthGate() {
-  const { user, loading, isNewUser } = useAuth();
+/**
+ * Top-level router.
+ *
+ * `/login` and `/onboarding` are public(-ish) — Login is always public,
+ * and Onboarding checks the session itself (AuthContext) and RPC status.
+ * Everything else is wrapped in AurzoAuthGate so it requires both a
+ * Supabase session AND `me_has_platform_access = true`.
+ */
+function RootRouter() {
+  const { user, loading } = useAuth();
 
   if (loading) {
     return (
@@ -45,19 +61,22 @@ function AuthGate() {
     );
   }
 
-  if (!user) {
-    return <Login />;
-  }
-
-  // Check per-user onboarding completion
-  const onboardingKey = `onboarding_complete_${user.id}`;
-  const onboardingDone = !!localStorage.getItem(onboardingKey) || !!localStorage.getItem("onboarding_complete");
-
-  if (isNewUser || !onboardingDone) {
-    return <Onboarding />;
-  }
-
-  return <Router />;
+  return (
+    <Switch>
+      <Route path="/login">
+        {user ? <Redirect to="/" /> : <Login />}
+      </Route>
+      <Route path="/onboarding">
+        {user ? <Onboarding /> : <Redirect to="/login" />}
+      </Route>
+      <Route>
+        {/* Everything else requires both session and platform access. */}
+        <AurzoAuthGate>
+          <AuthedRoutes />
+        </AurzoAuthGate>
+      </Route>
+    </Switch>
+  );
 }
 
 function App() {
@@ -69,7 +88,7 @@ function App() {
             <UserPreferencesProvider>
               <TooltipProvider>
                 <Toaster />
-                <AuthGate />
+                <RootRouter />
               </TooltipProvider>
             </UserPreferencesProvider>
           </AuthProvider>

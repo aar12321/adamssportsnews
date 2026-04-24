@@ -3,6 +3,7 @@ import type { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { setAccessToken } from "@/lib/queryClient";
 import { queryClient } from "@/lib/queryClient";
+import { signOutToMembership } from "@/lib/aurzo/auth";
 
 interface AuthContextValue {
   user: User | null;
@@ -182,13 +183,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    // Clear local state + cache first so the brief moment between the
+    // sign-out call and the redirect doesn't leak the previous user's
+    // data into the UI.
     setUser(null);
     setSession(null);
     setIsNewUser(false);
-    // Drop every cached query so the next account that signs in doesn't
-    // momentarily see the previous user's bets, preferences, or roster.
     queryClient.clear();
+    // Delegate to the Aurzo helper: signs the user out of Supabase and
+    // then redirects to `${MEMBERSHIP_URL}/dashboard` so they re-enter
+    // via the unified membership portal.
+    await signOutToMembership();
   }, []);
 
   return (

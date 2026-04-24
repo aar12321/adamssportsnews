@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Activity, Newspaper, Trophy, LayoutDashboard } from "lucide-react";
 import { Link } from "wouter";
 import { useUserPreferences } from "@/contexts/UserPreferencesContext";
@@ -9,6 +9,40 @@ import NewsFeed from "@/components/dashboard/NewsFeed";
 import AppSummaries from "@/components/dashboard/AppSummaries";
 import NextGameCard from "@/components/dashboard/NextGameCard";
 import InjuryAlertsCard from "@/components/dashboard/InjuryAlertsCard";
+import type { SportId } from "@shared/schema";
+
+/**
+ * Map Aurzo-onboarding league keys (what the Onboarding flow writes to
+ * `localStorage['aurzo.sports.prefs']`) back to internal SportId values
+ * so the Dashboard can filter on first render without waiting for the
+ * user-preferences context to hydrate from the server.
+ */
+const LEAGUE_TO_SPORT: Record<string, SportId> = {
+  NFL: "football",
+  NBA: "basketball",
+  MLB: "baseball",
+  NHL: "hockey",
+  soccer: "soccer",
+  // "college" has no 1:1 SportId — intentionally omitted so it doesn't
+  // narrow the filter to an unknown key.
+};
+
+function readInitialAurzoSports(): SportId[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem("aurzo.sports.prefs");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { leagues?: unknown };
+    if (!Array.isArray(parsed.leagues)) return [];
+    const mapped = parsed.leagues
+      .map(l => (typeof l === "string" ? LEAGUE_TO_SPORT[l] : undefined))
+      .filter((s): s is SportId => Boolean(s));
+    // De-dupe while preserving order.
+    return Array.from(new Set(mapped));
+  } catch {
+    return [];
+  }
+}
 
 type DashboardTabKey = "scores" | "news" | "apps";
 
@@ -39,6 +73,28 @@ export default function Dashboard() {
   const { dashboardLayout } = preferences;
   const { showLiveScores, showNewsFeed, showAppSummaries } = dashboardLayout;
   const anyWidgetEnabled = showLiveScores || showNewsFeed || showAppSummaries;
+
+  // Read the Aurzo onboarding prefs once on mount. This acts as a sensible
+  // initial filter when the user has just finished onboarding and the
+  // user-preferences context hasn't been populated with favoriteSports yet.
+  const [aurzoInitialSports] = useState<SportId[]>(() => readInitialAurzoSports());
+
+  // Effective favorite sports: prefer the context (it's the source of
+  // truth once the user has edited preferences), otherwise fall back to
+  // whatever Onboarding wrote to localStorage.
+  const effectiveFavoriteSports = useMemo<SportId[]>(() => {
+    if (preferences.favoriteSports && preferences.favoriteSports.length > 0) {
+      return preferences.favoriteSports;
+    }
+    return aurzoInitialSports;
+  }, [preferences.favoriteSports, aurzoInitialSports]);
+
+  const effectiveScoresSports = useMemo<SportId[]>(() => {
+    if (dashboardLayout.scoresSports && dashboardLayout.scoresSports.length > 0) {
+      return dashboardLayout.scoresSports;
+    }
+    return aurzoInitialSports;
+  }, [dashboardLayout.scoresSports, aurzoInitialSports]);
 
   const mobileTabs: { key: DashboardTabKey; label: string; Icon: typeof Activity; enabled: boolean }[] = [
     { key: "scores", label: "Scores", Icon: Activity, enabled: showLiveScores },
@@ -110,8 +166,8 @@ export default function Dashboard() {
               ))}
             </div>
           )}
-          {activeTab === "scores" && showLiveScores && <LiveScoresWidget sports={dashboardLayout.scoresSports} />}
-          {activeTab === "news" && showNewsFeed && <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} sports={preferences.favoriteSports} />}
+          {activeTab === "scores" && showLiveScores && <LiveScoresWidget sports={effectiveScoresSports} />}
+          {activeTab === "news" && showNewsFeed && <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} sports={effectiveFavoriteSports} />}
           {activeTab === "apps" && showAppSummaries && <AppSummaries />}
         </div>
       ) : (
@@ -130,14 +186,14 @@ export default function Dashboard() {
                 <div className={cn(
                   showNewsFeed ? "col-span-5 xl:col-span-4" : "col-span-12"
                 )}>
-                  <LiveScoresWidget sports={dashboardLayout.scoresSports} />
+                  <LiveScoresWidget sports={effectiveScoresSports} />
                 </div>
               )}
               {showNewsFeed && (
                 <div className={cn(
                   showLiveScores ? "col-span-7 xl:col-span-8" : "col-span-12"
                 )}>
-                  <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} sports={preferences.favoriteSports} />
+                  <NewsFeed categories={dashboardLayout.newsCategories} count={dashboardLayout.newsCount} sports={effectiveFavoriteSports} />
                 </div>
               )}
             </div>
