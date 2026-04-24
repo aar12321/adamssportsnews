@@ -42,6 +42,9 @@ const defaultPreferences: UserPreferences = {
   },
 };
 
+/** Where the auto-save loop is in its lifecycle. */
+export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
+
 interface UserPreferencesContextValue {
   preferences: UserPreferences;
   updatePreferences: (updates: Partial<UserPreferences>) => void;
@@ -51,6 +54,10 @@ interface UserPreferencesContextValue {
   bulkUpdate: (updater: (prev: UserPreferences) => UserPreferences) => void;
   resetPreferences: () => void;
   isLoading: boolean;
+  /** Lifecycle of the auto-save loop, surfaced to the UI. */
+  saveStatus: SaveStatus;
+  /** Epoch millis of the most recent successful server save, or null. */
+  lastSavedAt: number | null;
 }
 
 const UserPreferencesContext = createContext<UserPreferencesContextValue | undefined>(undefined);
@@ -75,6 +82,11 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
     }
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  // Skip the very first auto-save tick — it would fire just because we
+  // mounted and hydrated, not because the user changed anything.
+  const skipFirstSyncRef = React.useRef(true);
 
   // Update preferences when the authenticated user changes. Critically:
   // when `user` becomes null (sign-out), reset back to defaults so the
@@ -104,19 +116,39 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
   // the server would 401 that anyway because no token is attached).
   useEffect(() => {
     if (!user) return;
+    if (skipFirstSyncRef.current) {
+      skipFirstSyncRef.current = false;
+      return;
+    }
+    setSaveStatus("pending");
     const timeout = setTimeout(async () => {
+      setSaveStatus("saving");
       try {
-        await fetch(`/api/preferences/${userId}`, {
+        const res = await fetch(`/api/preferences/${userId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(preferences),
         });
+        if (!res.ok) throw new Error(`Save failed (${res.status})`);
+        setLastSavedAt(Date.now());
+        setSaveStatus("saved");
       } catch {
-        // Silent fail - local state is source of truth
+        // Local state is still the source of truth, so the user doesn't
+        // lose their pick — but we surface the failure so they know the
+        // server didn't accept it (network, 401, etc.).
+        setSaveStatus("error");
       }
     }, 1000);
     return () => clearTimeout(timeout);
   }, [preferences, userId, user]);
+
+  // Re-arm the skip guard whenever the user identity flips so the
+  // initial hydrate after a fresh sign-in doesn't trigger a phantom save.
+  useEffect(() => {
+    skipFirstSyncRef.current = true;
+    setSaveStatus("idle");
+    setLastSavedAt(null);
+  }, [userId]);
 
   // Persist locally
   useEffect(() => {
@@ -171,6 +203,8 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
       bulkUpdate,
       resetPreferences,
       isLoading,
+      saveStatus,
+      lastSavedAt,
     }}>
       {children}
     </UserPreferencesContext.Provider>

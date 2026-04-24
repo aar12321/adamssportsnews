@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import {
   User, Palette, Bell, LayoutDashboard, Trophy, Target, Smartphone,
-  Monitor, Sun, Moon, Laptop, ChevronRight, Check, Save, RotateCcw,
+  Monitor, Sun, Moon, Laptop, ChevronRight, Check, RotateCcw, Loader2, CloudOff,
   Shield, Activity, AlertCircle, DollarSign, Users, BarChart3, LogOut, Mail,
   Plus, X
 } from "lucide-react";
@@ -67,6 +67,64 @@ function Toggle({ checked, onChange, label, description }: {
   );
 }
 
+/**
+ * Badge in the page header that mirrors the auto-save state coming
+ * out of UserPreferencesContext. Replaces the old "Save" button —
+ * preferences have always saved on change, the button just lied about
+ * being responsible. Now the user sees the truth: pending → saving →
+ * saved (or error if the network blew up).
+ */
+function SaveStatusBadge({ status, lastSavedAt }: { status: "idle" | "pending" | "saving" | "saved" | "error"; lastSavedAt: number | null }) {
+  // Re-render once a minute so "Saved 3m ago" stays accurate.
+  const [, setTick] = useState(0);
+  React.useEffect(() => {
+    if (status !== "saved") return;
+    const i = setInterval(() => setTick(t => t + 1), 60_000);
+    return () => clearInterval(i);
+  }, [status]);
+
+  const formatAgo = (ts: number) => {
+    const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (seconds < 5) return "just now";
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
+  };
+
+  if (status === "idle") {
+    return (
+      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs text-muted-foreground border border-border/60">
+        <Check className="w-3.5 h-3.5" />
+        <span>All changes saved</span>
+      </div>
+    );
+  }
+  if (status === "pending" || status === "saving") {
+    return (
+      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs text-muted-foreground border border-border/60" role="status">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        <span>{status === "saving" ? "Saving…" : "Pending…"}</span>
+      </div>
+    );
+  }
+  if (status === "saved") {
+    return (
+      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs text-green-400 bg-green-500/10 border border-green-500/20" role="status">
+        <Check className="w-3.5 h-3.5" />
+        <span>Saved {lastSavedAt ? formatAgo(lastSavedAt) : ""}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs text-yellow-400 bg-yellow-500/10 border border-yellow-500/20" role="alert" title="Stored locally — couldn't reach the server">
+      <CloudOff className="w-3.5 h-3.5" />
+      <span>Saved locally only</span>
+    </div>
+  );
+}
+
 function SportBadge({ sport, selected, onClick }: { sport: typeof SPORTS[0]; selected: boolean; onClick: () => void }) {
   return (
     <button
@@ -86,18 +144,16 @@ function SportBadge({ sport, selected, onClick }: { sport: typeof SPORTS[0]; sel
 }
 
 export default function Profile() {
-  const { preferences, updatePreferences, updateDashboardLayout, updateNotifications, updateBettingPrefs, resetPreferences } = useUserPreferences();
+  const {
+    preferences, updatePreferences, updateDashboardLayout,
+    updateNotifications, updateBettingPrefs, resetPreferences,
+    saveStatus, lastSavedAt,
+  } = useUserPreferences();
   const { themeChoice, setThemeChoice } = useTheme();
   const { viewMode, setViewMode } = useViewMode();
   const { user, signOut } = useAuth();
-  const [saved, setSaved] = useState(false);
   const [activeSection, setActiveSection] = useState("account");
   const [newTeam, setNewTeam] = useState("");
-
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
 
   const handleReset = () => {
     if (typeof window !== "undefined" && !window.confirm(
@@ -188,24 +244,19 @@ export default function Profile() {
   return (
     <div className="animate-fade-in max-w-4xl">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Profile & Settings</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Customize your experience</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Changes save automatically</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-3">
+          <SaveStatusBadge status={saveStatus} lastSavedAt={lastSavedAt} />
           <button
             onClick={handleReset}
             className="btn-ghost gap-1.5 py-2"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             Reset
-          </button>
-          <button
-            onClick={handleSave}
-            className={cn("btn-primary py-2", saved && "bg-green-500")}
-          >
-            {saved ? <><Check className="w-3.5 h-3.5" /> Saved!</> : <><Save className="w-3.5 h-3.5" /> Save</>}
           </button>
         </div>
       </div>
