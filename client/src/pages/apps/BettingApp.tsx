@@ -446,10 +446,14 @@ function AnalysisPanel({ analysis, game, onPlaceBet, isPlacing }: { analysis: an
 
           {/* Stake chips */}
           <div>
-            <p className="text-xs text-muted-foreground mb-2">Stake</p>
-            <div className="grid grid-cols-5 gap-2">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-muted-foreground">Stake</p>
+              <p className="text-[11px] text-muted-foreground">$1 – $10,000</p>
+            </div>
+            <div className="grid grid-cols-5 gap-2 mb-2">
               {[10, 25, 50, 100, 250].map(amount => (
                 <button key={amount}
+                  type="button"
                   onClick={() => setStake(amount)}
                   className={cn("py-2 rounded-lg text-xs font-semibold transition-all border",
                     stake === amount
@@ -460,6 +464,31 @@ function AnalysisPanel({ analysis, game, onPlaceBet, isPlacing }: { analysis: an
                 </button>
               ))}
             </div>
+            {/* Custom amount — coexists with the chips so the user can
+                land on any whole-dollar value without leaving the slip. */}
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={10000}
+                step={1}
+                value={stake}
+                onChange={e => {
+                  const raw = e.target.value;
+                  if (raw === "") { setStake(0); return; }
+                  const n = Math.floor(Number(raw));
+                  if (!Number.isFinite(n) || n < 0) return;
+                  // Cap at $10k so a stray zero doesn't try to place an
+                  // impossible bet — the server caps at balance, this just
+                  // keeps the slider out of nonsense range.
+                  setStake(Math.min(n, 10000));
+                }}
+                aria-label="Custom stake amount"
+                className="w-full h-10 pl-7 pr-3 bg-input border border-border rounded-lg text-sm font-semibold text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-all num"
+              />
+            </div>
           </div>
 
           {/* Potential payout + place bet */}
@@ -469,13 +498,25 @@ function AnalysisPanel({ analysis, game, onPlaceBet, isPlacing }: { analysis: an
               <p className="text-lg font-bold text-green-400 num">+${(calculatePayout() - stake).toFixed(2)}</p>
               <p className="text-xs text-muted-foreground">Total payout: ${calculatePayout().toFixed(2)}</p>
             </div>
-            <button
-              onClick={handlePlaceBet}
-              disabled={isPlacing || hasStarted}
-              className="btn-primary whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {isPlacing ? "Placing…" : `Place $${stake} Bet`}
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              <button
+                onClick={handlePlaceBet}
+                disabled={isPlacing || hasStarted || stake < 1}
+                className="btn-primary whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
+                title={
+                  hasStarted ? "Game already started — betting closed"
+                  : stake < 1 ? "Stake must be at least $1"
+                  : undefined
+                }
+              >
+                {isPlacing ? "Placing…" : `Place $${stake} Bet`}
+              </button>
+              {(hasStarted || stake < 1) && (
+                <p className="text-[11px] text-muted-foreground" role="status">
+                  {hasStarted ? "Betting closed for this game" : "Enter a stake of at least $1"}
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -503,10 +544,11 @@ function AccountCard({ account, onReset, isResetting }: { account: any; onReset:
         <button
           onClick={handleReset}
           disabled={isResetting}
-          className="btn-ghost py-1 text-xs gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+          title="Clears your $10,000 balance and all bet history"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-destructive border border-destructive/20 bg-destructive/5 hover:bg-destructive/15 hover:border-destructive/40 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
           <RotateCcw className={cn("w-3.5 h-3.5", isResetting && "animate-spin")} />
-          {isResetting ? "Resetting…" : "Reset"}
+          {isResetting ? "Resetting…" : "Reset account"}
         </button>
       </div>
       <div className="mb-4">
