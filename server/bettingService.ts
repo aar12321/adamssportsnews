@@ -1,10 +1,18 @@
 import type { BetAnalysis, MockBet, MockAccount, BetType } from "@shared/schema";
 import { oddsApiService } from "./oddsApiService";
-import { readSnapshot, scheduleSnapshot } from "./persistence";
+import { readSnapshot, scheduleSnapshot, scheduleAsync } from "./persistence";
+import {
+  isDbEnabled,
+  hydrateAccountsFromDb,
+  hydrateBetsFromDb,
+  upsertAccountsToDb,
+  upsertBetsToDb,
+} from "./dbStore";
 
 // Betting state lives in these maps at runtime. On boot we hydrate from
-// data/betting.json (when persistence is available); mutations debounce a
-// write back so a server restart doesn't wipe user bankrolls.
+// Postgres when DATABASE_URL is set; otherwise from data/betting.json.
+// Mutations debounce a write back to whichever backend is configured,
+// plus a JSON snapshot as a durable fallback during rollout.
 interface BettingSnapshot {
   accounts: [string, MockAccount][];
   bets: [string, MockBet[]][];
@@ -15,11 +23,33 @@ const initial = readSnapshot<BettingSnapshot>(SNAPSHOT_NAME, { accounts: [], bet
 const mockAccounts = new Map<string, MockAccount>(initial.accounts);
 const mockBets = new Map<string, MockBet[]>(initial.bets);
 
+// If a Postgres client is available, overlay it on top of the JSON
+// snapshot. Whichever side has newer data for a user wins — the DB is
+// authoritative when configured, and the JSON snapshot carries us
+// through dev / rollback without a DB.
+if (isDbEnabled()) {
+  void Promise.all([hydrateAccountsFromDb(), hydrateBetsFromDb()]).then(([accts, bets]) => {
+    if (accts) accts.forEach((v, k) => mockAccounts.set(k, v));
+    if (bets) bets.forEach((v, k) => mockBets.set(k, v));
+  }).catch((err) => {
+    console.warn("[bettingService] DB hydrate failed:", err?.message ?? err);
+  });
+}
+
 function saveBetting() {
+  // JSON snapshot (always on when DATA_DIR is writable).
   scheduleSnapshot(SNAPSHOT_NAME, () => ({
     accounts: Array.from(mockAccounts.entries()),
     bets: Array.from(mockBets.entries()),
   }));
+  // Postgres write-behind (only when DATABASE_URL is set). Fire-and-forget;
+  // failures are logged in dbStore and don't break the request.
+  if (isDbEnabled()) {
+    scheduleAsync(`${SNAPSHOT_NAME}:db`, async () => {
+      await upsertAccountsToDb(mockAccounts);
+      await upsertBetsToDb(mockBets);
+    });
+  }
 }
 
 const DEFAULT_BALANCE = 10000; // $10,000 starting mock balance

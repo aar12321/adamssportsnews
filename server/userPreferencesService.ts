@@ -1,5 +1,6 @@
 import type { UserPreferences } from "@shared/schema";
-import { readSnapshot, scheduleSnapshot } from "./persistence";
+import { readSnapshot, scheduleSnapshot, scheduleAsync } from "./persistence";
+import { isDbEnabled, hydratePreferencesFromDb, upsertPreferencesToDb } from "./dbStore";
 
 const defaultPreferences: UserPreferences = {
   userId: "default",
@@ -43,12 +44,25 @@ const defaultPreferences: UserPreferences = {
 
 // Hydrate from disk on boot so restarts don't reset people's display name,
 // favourites, dashboard layout, etc. Mutations below debounce a write back.
+// When DATABASE_URL is set, Postgres is the authoritative store and the
+// JSON snapshot is kept in lockstep as a durable fallback.
 const SNAPSHOT_NAME = "preferences";
 const initialEntries = readSnapshot<[string, UserPreferences][]>(SNAPSHOT_NAME, []);
 const userPreferencesStore = new Map<string, UserPreferences>(initialEntries);
 
+if (isDbEnabled()) {
+  void hydratePreferencesFromDb().then((fromDb) => {
+    if (fromDb) fromDb.forEach((v, k) => userPreferencesStore.set(k, v));
+  }).catch((err) => {
+    console.warn("[userPreferencesService] DB hydrate failed:", err?.message ?? err);
+  });
+}
+
 function savePreferences() {
   scheduleSnapshot(SNAPSHOT_NAME, () => Array.from(userPreferencesStore.entries()));
+  if (isDbEnabled()) {
+    scheduleAsync(`${SNAPSHOT_NAME}:db`, () => upsertPreferencesToDb(userPreferencesStore));
+  }
 }
 
 export class UserPreferencesService {

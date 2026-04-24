@@ -65,6 +65,10 @@ export function readSnapshot<T>(name: string, fallback: T): T {
 const pendingTimers = new Map<string, NodeJS.Timeout>();
 const pendingSnapshots = new Map<string, () => unknown>();
 
+const pendingAsyncTimers = new Map<string, NodeJS.Timeout>();
+const pendingAsyncFns = new Map<string, () => Promise<void>>();
+const inflightAsync = new Map<string, Promise<void>>();
+
 function writeSync(name: string, snapshot: unknown) {
   if (!ensureDir()) return;
   const file = path.join(DATA_DIR, `${name}.json`);
@@ -101,8 +105,41 @@ export function scheduleSnapshot(name: string, get: () => unknown) {
   );
 }
 
-/** Synchronously flush anything pending. Called from shutdown hooks. */
-export function flushAll() {
+/**
+ * Schedule a debounced async task — used for write-behind to a backend
+ * like Postgres. Coalesces bursts so we run the latest closure at most
+ * once per DEBOUNCE_MS window. Failures are logged, never thrown — the
+ * request that triggered the write has already been served.
+ */
+export function scheduleAsync(name: string, fn: () => Promise<void>) {
+  pendingAsyncFns.set(name, fn);
+  const existing = pendingAsyncTimers.get(name);
+  if (existing) clearTimeout(existing);
+  pendingAsyncTimers.set(
+    name,
+    setTimeout(() => {
+      pendingAsyncTimers.delete(name);
+      const next = pendingAsyncFns.get(name);
+      if (!next) return;
+      pendingAsyncFns.delete(name);
+      const promise = next()
+        .catch((err: any) => {
+          console.warn(`[persistence] async task '${name}' failed: ${err?.message ?? err}`);
+        })
+        .finally(() => {
+          if (inflightAsync.get(name) === promise) inflightAsync.delete(name);
+        });
+      inflightAsync.set(name, promise);
+    }, DEBOUNCE_MS)
+  );
+}
+
+/**
+ * Synchronously flush JSON snapshots and return a promise that also
+ * waits for any pending async write-behind tasks to drain. Shutdown
+ * hooks await this so we don't lose the last second of writes.
+ */
+export function flushAll(): Promise<void> {
   pendingTimers.forEach((timer, name) => {
     clearTimeout(timer);
     const get = pendingSnapshots.get(name);
@@ -110,16 +147,36 @@ export function flushAll() {
     if (get) writeSync(name, get());
   });
   pendingTimers.clear();
+
+  // Run any pending debounced async tasks immediately, then wait for
+  // both the freshly-kicked-off ones and anything already in flight.
+  pendingAsyncTimers.forEach((timer, name) => {
+    clearTimeout(timer);
+    const fn = pendingAsyncFns.get(name);
+    pendingAsyncFns.delete(name);
+    if (!fn) return;
+    const promise = fn()
+      .catch((err: any) => {
+        console.warn(`[persistence] async task '${name}' failed during flush: ${err?.message ?? err}`);
+      })
+      .finally(() => {
+        if (inflightAsync.get(name) === promise) inflightAsync.delete(name);
+      });
+    inflightAsync.set(name, promise);
+  });
+  pendingAsyncTimers.clear();
+
+  return Promise.all(Array.from(inflightAsync.values())).then(() => undefined);
 }
 
 let hooksInstalled = false;
 export function installShutdownHooks() {
   if (hooksInstalled) return;
   hooksInstalled = true;
-  const handler = () => {
-    try { flushAll(); } catch { /* swallow — we're exiting */ }
+  const drain = async () => {
+    try { await flushAll(); } catch { /* swallow — we're exiting */ }
   };
-  process.on("beforeExit", handler);
-  process.on("SIGINT", () => { handler(); process.exit(0); });
-  process.on("SIGTERM", () => { handler(); process.exit(0); });
+  process.on("beforeExit", () => { void drain(); });
+  process.on("SIGINT", () => { void drain().then(() => process.exit(0)); });
+  process.on("SIGTERM", () => { void drain().then(() => process.exit(0)); });
 }

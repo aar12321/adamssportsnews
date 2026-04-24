@@ -328,3 +328,87 @@ export interface FilterState {
   timeRange: TimeRange;
   searchQuery: string;
 }
+
+// ==================== DRIZZLE (Postgres) TABLES ====================
+//
+// These are the persistent-storage tables for state that currently lives
+// in server-memory Maps. Drizzle + drizzle-kit read this file (see
+// `drizzle.config.ts` → `schema: "./shared/schema.ts"`) to generate
+// migrations and typed query builders.
+//
+// MockAccount, MockBet, and UserPreferences above are the runtime /
+// wire-format shapes. Some fields live as `jsonb` here because their
+// internal structure is owned by the application (roster, layout,
+// notifications, etc.) and we don't need SQL to index into them.
+//
+// Nothing imports from these tables unless the server is running with
+// DATABASE_URL configured — see `server/db.ts`.
+
+import {
+  pgTable,
+  text,
+  varchar,
+  integer,
+  doublePrecision,
+  timestamp,
+  jsonb,
+  boolean,
+} from "drizzle-orm/pg-core";
+
+export const mockAccountsTable = pgTable("mock_accounts", {
+  userId: text("user_id").primaryKey(),
+  balance: doublePrecision("balance").notNull().default(10000),
+  startingBalance: doublePrecision("starting_balance").notNull().default(10000),
+  totalBets: integer("total_bets").notNull().default(0),
+  wonBets: integer("won_bets").notNull().default(0),
+  lostBets: integer("lost_bets").notNull().default(0),
+  pushBets: integer("push_bets").notNull().default(0),
+  totalWagered: doublePrecision("total_wagered").notNull().default(0),
+  totalProfit: doublePrecision("total_profit").notNull().default(0),
+  winRate: doublePrecision("win_rate").notNull().default(0),
+  roi: doublePrecision("roi").notNull().default(0),
+  currentStreak: integer("current_streak").notNull().default(0),
+  bestWinStreak: integer("best_win_streak").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const mockBetsTable = pgTable("mock_bets", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  userId: text("user_id").notNull(),
+  gameId: varchar("game_id", { length: 128 }).notNull(),
+  homeTeam: text("home_team").notNull(),
+  awayTeam: text("away_team").notNull(),
+  sport: varchar("sport", { length: 32 }).notNull(),
+  betType: varchar("bet_type", { length: 32 }).notNull(),
+  selectedTeam: text("selected_team"),
+  amount: doublePrecision("amount").notNull(),
+  odds: integer("odds").notNull(),
+  spread: doublePrecision("spread"),
+  overUnder: doublePrecision("over_under"),
+  isOver: boolean("is_over"),
+  status: varchar("status", { length: 16 }).notNull(),
+  potentialPayout: doublePrecision("potential_payout").notNull(),
+  winProbability: doublePrecision("win_probability").notNull(),
+  placedAt: timestamp("placed_at", { withTimezone: true }).notNull(),
+  gameStartTime: timestamp("game_start_time", { withTimezone: true }),
+  gameEndTime: timestamp("game_end_time", { withTimezone: true }),
+  settledAt: timestamp("settled_at", { withTimezone: true }),
+  result: text("result"),
+});
+
+export const userPreferencesTable = pgTable("user_preferences", {
+  userId: text("user_id").primaryKey(),
+  displayName: text("display_name").notNull().default("Sports Fan"),
+  avatar: text("avatar"),
+  theme: varchar("theme", { length: 16 }).notNull().default("dark"),
+  viewMode: varchar("view_mode", { length: 16 }).notNull().default("auto"),
+  favoriteSports: jsonb("favorite_sports").$type<SportId[]>().notNull().default([]),
+  favoriteTeams: jsonb("favorite_teams").$type<string[]>().notNull().default([]),
+  favoritePlayers: jsonb("favorite_players").$type<string[]>().notNull().default([]),
+  dashboardLayout: jsonb("dashboard_layout").$type<UserPreferences["dashboardLayout"]>().notNull(),
+  notifications: jsonb("notifications").$type<UserPreferences["notifications"]>().notNull(),
+  betting: jsonb("betting").$type<UserPreferences["betting"]>().notNull(),
+  fantasy: jsonb("fantasy").$type<UserPreferences["fantasy"]>().notNull(),
+  analyst: jsonb("analyst").$type<UserPreferences["analyst"]>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
