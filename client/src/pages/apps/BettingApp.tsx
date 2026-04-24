@@ -4,7 +4,7 @@ import {
   Target, RotateCcw, ChevronLeft,
   BarChart2, Trophy, CheckCircle2, XCircle, Clock, AlertCircle, Flame, Search,
   Trash2, TrendingUp, TrendingDown, DollarSign, ArrowUpDown, ChevronUp, ChevronDown,
-  Calendar, Zap
+  Calendar, Zap, Loader2, Info
 } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
@@ -116,8 +116,36 @@ function AiCommentary({ analysis, gameHasStarted }: { analysis: any; gameHasStar
     onSuccess: (data) => setText(data.text),
   });
 
-  // Hide entirely when AI isn't configured or the game has already started.
-  if (!aiStatus?.enabled || gameHasStarted) return null;
+  // The probe is in flight — render a placeholder so the slot doesn't
+  // shift around as the response lands.
+  if (aiStatus === undefined) {
+    return (
+      <div className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-border/60 bg-muted/30 text-xs text-muted-foreground">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        <span>Checking AI…</span>
+      </div>
+    );
+  }
+
+  // AI not configured server-side. Don't pretend the button works —
+  // show a disabled affordance so the user knows the feature exists
+  // but needs setup, instead of having it silently disappear.
+  if (!aiStatus.enabled) {
+    return (
+      <button
+        type="button"
+        disabled
+        title="The server's ANTHROPIC_API_KEY isn't set, so AI takes are off. Ask your admin to configure it."
+        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-border/60 bg-muted/30 text-xs font-medium text-muted-foreground cursor-not-allowed"
+      >
+        <Zap className="w-3.5 h-3.5 opacity-60" />
+        AI take unavailable
+      </button>
+    );
+  }
+
+  // Game's already started — same idea, no point asking for a pre-game take.
+  if (gameHasStarted) return null;
 
   if (text) {
     return (
@@ -138,15 +166,26 @@ function AiCommentary({ analysis, gameHasStarted }: { analysis: any; gameHasStar
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => mutation.mutate()}
-      disabled={mutation.isPending}
-      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-primary/20 bg-primary/5 text-xs font-semibold text-primary hover:bg-primary/10 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-    >
-      <Zap className="w-3.5 h-3.5" />
-      {mutation.isPending ? "Thinking…" : mutation.isError ? "Retry AI take" : "Ask the AI for a take"}
-    </button>
+    <div className="space-y-1.5">
+      <button
+        type="button"
+        onClick={() => mutation.mutate()}
+        disabled={mutation.isPending}
+        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-primary/20 bg-primary/5 text-xs font-semibold text-primary hover:bg-primary/10 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        <Zap className="w-3.5 h-3.5" />
+        {mutation.isPending
+          ? "Thinking…"
+          : mutation.isError
+            ? "Try AI take again"
+            : "Ask the AI for a take"}
+      </button>
+      {mutation.isError && (
+        <p className="text-[11px] text-orange-400 text-center" role="alert">
+          {(mutation.error as Error)?.message || "AI is temporarily unavailable. Try again."}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -1076,11 +1115,19 @@ export default function BettingApp() {
             <div className="flex items-center justify-between gap-2">
               <h3 className="font-semibold text-sm text-foreground">Matchups</h3>
               {scheduleData?.games?.length ? (
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-green-400/90 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded-full">
-                  ESPN feed
+                <span
+                  className="text-[10px] font-semibold uppercase tracking-wider text-green-400/90 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+                  title="Live games and start times pulled from ESPN's public schedule. Lines come from your configured sportsbook (or our internal model when none is set)."
+                >
+                  Live · ESPN
                 </span>
               ) : (
-                <span className="text-[10px] font-medium text-muted-foreground">Demo slate</span>
+                <span
+                  className="text-[10px] font-medium text-muted-foreground bg-muted/50 border border-border px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+                  title="No real games on the schedule right now (off-day or feed unavailable). We're showing sample matchups so you can still try the workflow — they're not real games."
+                >
+                  <Info className="w-2.5 h-2.5" /> Sample games
+                </span>
               )}
             </div>
             {scheduleError && (
