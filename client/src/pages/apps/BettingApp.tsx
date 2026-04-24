@@ -790,17 +790,6 @@ function BetHistoryList({ bets, onCancel, cancellingBetId }: { bets: any[]; onCa
                   <span>Odds: <span className="font-semibold text-foreground num">{bet.odds > 0 ? "+" : ""}{bet.odds}</span></span>
                   <span>{Math.round((bet.winProbability || 0.5) * 100)}% chance</span>
                 </div>
-                {bet.status === "pending" && onCancel && (
-                  <button
-                    onClick={() => onCancel(bet.id)}
-                    disabled={cancellingBetId === bet.id}
-                    className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Cancel bet"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    {cancellingBetId === bet.id ? "Cancelling…" : "Cancel"}
-                  </button>
-                )}
               </div>
 
               {/* Timestamps */}
@@ -848,6 +837,35 @@ function BetHistoryList({ bets, onCancel, cancellingBetId }: { bets: any[]; onCa
                   {bet.result}
                 </p>
               )}
+
+              {/* Cancel — only for pending bets, dedicated row so the
+                  destructive action isn't tucked into the meta line. */}
+              {bet.status === "pending" && onCancel && (() => {
+                const start = bet.gameStartTime ? new Date(bet.gameStartTime).getTime() : null;
+                const lockedIn = start != null && Date.now() >= start;
+                return (
+                  <div className="pt-2 border-t border-border/40 flex items-center justify-between">
+                    <p className="text-[11px] text-muted-foreground">
+                      {lockedIn
+                        ? "Locked in — game has started"
+                        : "Refunds your stake to the mock balance"}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (typeof window !== "undefined" && !window.confirm("Cancel this bet? Your stake will be refunded.")) return;
+                        onCancel(bet.id);
+                      }}
+                      disabled={cancellingBetId === bet.id || lockedIn}
+                      title={lockedIn ? "Can't cancel after the game starts" : "Cancel this bet"}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-destructive border border-destructive/20 bg-destructive/5 hover:bg-destructive/15 hover:border-destructive/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      {cancellingBetId === bet.id ? "Cancelling…" : "Cancel bet"}
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
