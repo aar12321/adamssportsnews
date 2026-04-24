@@ -11,6 +11,8 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, displayName: string) => Promise<{ error: string | null }>;
   signInWithGoogle: () => Promise<{ error: string | null }>;
+  resetPassword: (email: string) => Promise<{ error: string | null }>;
+  resendConfirmation: (email: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   isNewUser: boolean;
   setIsNewUser: (v: boolean) => void;
@@ -214,6 +216,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error: null };
   }, []);
 
+  /**
+   * Send a password-reset email. Supabase mails a magic link that lands
+   * on `/reset-password` (or whatever URL is allowed in the dashboard);
+   * the user updates their password from there.
+   */
+  const resetPassword = useCallback(async (email: string) => {
+    const redirectTo =
+      typeof window !== "undefined" ? `${window.location.origin}/` : undefined;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+    if (error) return { error: error.message };
+    return { error: null };
+  }, []);
+
+  /**
+   * Re-send the email-confirmation link for users who lost the original
+   * one or never received it. No-op (returns success) if the user is
+   * already confirmed — Supabase handles that case server-side.
+   */
+  const resendConfirmation = useCallback(async (email: string) => {
+    const redirectTo =
+      typeof window !== "undefined" ? `${window.location.origin}/` : undefined;
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: { emailRedirectTo: redirectTo },
+    });
+    if (error) return { error: error.message };
+    return { error: null };
+  }, []);
+
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     setUser(null);
@@ -225,7 +257,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signIn, signUp, signInWithGoogle, signOut, isNewUser, setIsNewUser }}>
+    <AuthContext.Provider value={{ user, session, loading, signIn, signUp, signInWithGoogle, resetPassword, resendConfirmation, signOut, isNewUser, setIsNewUser }}>
       {children}
     </AuthContext.Provider>
   );
