@@ -25,6 +25,7 @@ const defaultPreferences: UserPreferences = {
     breakingNews: true,
     fantasyAlerts: true,
     bettingAlerts: false,
+    alertIntensity: "all",
   },
   betting: {
     defaultStake: 50,
@@ -62,6 +63,21 @@ interface UserPreferencesContextValue {
 
 const UserPreferencesContext = createContext<UserPreferencesContextValue | undefined>(undefined);
 
+// Older saved preferences predate `alertIntensity` and similar fields. The
+// shallow `{ ...defaultPreferences, ...stored }` merge below would otherwise
+// drop them entirely, leaving the type populated with `undefined`. Reseat the
+// nested objects so every consumer can rely on the defaults being present.
+function normalizePrefs(input: UserPreferences): UserPreferences {
+  return {
+    ...input,
+    notifications: { ...defaultPreferences.notifications, ...input.notifications },
+    dashboardLayout: { ...defaultPreferences.dashboardLayout, ...input.dashboardLayout },
+    betting: { ...defaultPreferences.betting, ...input.betting },
+    fantasy: { ...defaultPreferences.fantasy, ...input.fantasy },
+    analyst: { ...defaultPreferences.analyst, ...input.analyst },
+  };
+}
+
 export function UserPreferencesProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id || "default";
@@ -70,10 +86,10 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
   const [preferences, setPreferences] = useState<UserPreferences>(() => {
     try {
       const stored = localStorage.getItem(storageKey);
-      if (stored) return { ...defaultPreferences, ...JSON.parse(stored), userId };
+      if (stored) return normalizePrefs({ ...defaultPreferences, ...JSON.parse(stored), userId });
       // Try the old key for backward compatibility
       const old = localStorage.getItem("userPreferences");
-      if (old) return { ...defaultPreferences, ...JSON.parse(old), userId };
+      if (old) return normalizePrefs({ ...defaultPreferences, ...JSON.parse(old), userId });
       // Use user metadata for display name
       const displayName = user?.user_metadata?.display_name || user?.email?.split("@")[0] || "Sports Fan";
       return { ...defaultPreferences, userId, displayName };
@@ -97,7 +113,7 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
       try {
         const stored = localStorage.getItem(storageKey);
         if (stored) {
-          setPreferences(prev => ({ ...prev, ...JSON.parse(stored), userId }));
+          setPreferences(prev => normalizePrefs({ ...prev, ...JSON.parse(stored), userId }));
         } else {
           const displayName = user.user_metadata?.display_name || user.email?.split("@")[0] || "Sports Fan";
           setPreferences(prev => ({ ...prev, userId, displayName: prev.displayName === "Sports Fan" ? displayName : prev.displayName }));

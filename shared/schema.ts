@@ -302,6 +302,13 @@ export interface UserPreferences {
     breakingNews: boolean;
     fantasyAlerts: boolean;
     bettingAlerts: boolean;
+    /**
+     * Gate applied to the news feed and push-style alerts.
+     * - "breaking": only breaking-news items
+     * - "important": breaking + injury + trade (the moves that change a fan's day)
+     * - "all": every item the categories filter would otherwise allow
+     */
+    alertIntensity: "breaking" | "important" | "all";
   };
   betting: {
     defaultStake: number;

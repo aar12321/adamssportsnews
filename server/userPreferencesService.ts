@@ -25,6 +25,7 @@ const defaultPreferences: UserPreferences = {
     breakingNews: true,
     fantasyAlerts: true,
     bettingAlerts: false,
+    alertIntensity: "all",
   },
   betting: {
     defaultStake: 50,
