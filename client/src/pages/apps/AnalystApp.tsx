@@ -70,6 +70,66 @@ function explainStat(key: string): string | null {
   return STAT_CONTEXT[collapsed] ?? null;
 }
 
+// Short, human storyline pulled from the same fields the rest of the team
+// page already shows. The point isn't novel data — it's stitching what the
+// user already sees into one sentence so a casual fan can ask "what's the
+// vibe right now?" and get an answer without studying the grid.
+function buildTeamStoryline(team: any): { headline: string; body: string } | null {
+  if (!team) return null;
+  const streak: string | undefined = team.streak;
+  const form: string[] = Array.isArray(team.recentForm) ? team.recentForm : [];
+  const injuries: string[] = Array.isArray(team.injuries) ? team.injuries : [];
+  const winPct: number = typeof team.winPct === "number" ? team.winPct : 0;
+
+  const wins = form.filter(r => r === "W").length;
+  const losses = form.filter(r => r === "L").length;
+
+  const streakLen = streak ? parseInt(streak.replace(/[^0-9]/g, ""), 10) : 0;
+  const isHotStreak = streak?.startsWith("W") && streakLen >= 3;
+  const isColdStreak = streak?.startsWith("L") && streakLen >= 3;
+
+  let headline: string;
+  if (isHotStreak) headline = `${team.name} are rolling`;
+  else if (isColdStreak) headline = `${team.name} are sliding`;
+  else if (winPct >= 0.65) headline = `${team.name} keep stacking wins`;
+  else if (winPct <= 0.4) headline = `${team.name} are searching for answers`;
+  else if (injuries.length >= 2) headline = `${team.name} are managing a banged-up roster`;
+  else headline = `${team.name} are right in the mix`;
+
+  const parts: string[] = [];
+  if (streak) {
+    if (isHotStreak) parts.push(`On a ${streak} run`);
+    else if (isColdStreak) parts.push(`Lost ${streakLen} straight`);
+    else parts.push(`Currently on ${streak}`);
+  }
+  if (form.length > 0) {
+    parts.push(`${wins}-${losses} over the last ${form.length}`);
+  }
+  if (typeof team.differential === "number") {
+    const diff = team.differential as number;
+    const sign = diff > 0 ? "+" : "";
+    parts.push(`scoring margin of ${sign}${diff.toFixed(1)} per game`);
+  }
+  if (injuries.length === 1) {
+    parts.push(`watching one injury — ${injuries[0]}`);
+  } else if (injuries.length >= 2) {
+    parts.push(`navigating ${injuries.length} injuries`);
+  }
+  if (Array.isArray(team.keyPlayers) && team.keyPlayers.length > 0) {
+    parts.push(`leaning on ${team.keyPlayers.slice(0, 2).join(" and ")}`);
+  }
+
+  // Stitch into one readable sentence with serial commas + final "and".
+  let body = "";
+  if (parts.length === 1) body = parts[0] + ".";
+  else if (parts.length === 2) body = parts.join(", ") + ".";
+  else if (parts.length > 2) body = parts.slice(0, -1).join(", ") + ", and " + parts[parts.length - 1] + ".";
+  // Capitalise first letter.
+  body = body.charAt(0).toUpperCase() + body.slice(1);
+
+  return { headline, body };
+}
+
 function FormBadges({ form }: { form: string[] }) {
   return (
     <div className="flex items-center gap-1">
@@ -130,6 +190,7 @@ function TeamCard({ team, onClick, isSelected }: { team: any; onClick: () => voi
 
 function TeamDetail({ team }: { team: any }) {
   const statEntries = Object.entries(team.stats || {}).slice(0, 8);
+  const storyline = buildTeamStoryline(team);
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -176,6 +237,20 @@ function TeamDetail({ team }: { team: any }) {
           </div>
         )}
       </div>
+
+      {/* Storyline — one-sentence "what's the vibe right now" pulled from
+          the same fields above so a casual fan doesn't have to triangulate
+          streak + form + injuries themselves. */}
+      {storyline && (
+        <div className="glass-card p-5 border-primary/20 bg-primary/5" data-testid="card-team-storyline">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Flame className="w-4 h-4 text-primary" />
+            <span className="text-[11px] font-bold uppercase tracking-wider text-primary">Storyline</span>
+          </div>
+          <h4 className="text-base font-bold text-foreground mb-1">{storyline.headline}</h4>
+          <p className="text-sm text-muted-foreground leading-relaxed">{storyline.body}</p>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="glass-card p-5">
