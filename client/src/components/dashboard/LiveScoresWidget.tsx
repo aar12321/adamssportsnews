@@ -31,6 +31,21 @@ function isKeyMoment(article: NewsArticle): boolean {
   return LIVE_MOMENT_KEYWORDS.some(k => haystack.includes(k));
 }
 
+// Strip the city / qualifier so a story about "the Celtics" matches a game
+// listed as "Boston Celtics". Same trick for "Manchester City" → "city" so
+// soccer queries don't miss obvious matches.
+function teamTokens(name: string): string[] {
+  const words = name.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  return [name.toLowerCase(), words[words.length - 1]];
+}
+
+function articleMentionsGame(article: NewsArticle, awayTeam: string, homeTeam: string): boolean {
+  const haystack = `${article.title} ${(article.tags || []).join(" ")}`.toLowerCase();
+  const tokens = [...teamTokens(awayTeam), ...teamTokens(homeTeam)];
+  return tokens.some(t => t.length >= 3 && haystack.includes(t));
+}
+
 function relativeTime(iso?: string): string {
   if (!iso) return "now";
   const ms = Date.now() - new Date(iso).getTime();
@@ -301,15 +316,16 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
   }, []);
 
   // Key moments strip — TDs, goals, walk-offs from the news feed. Only fetch
-  // when there's at least one live game on screen so we don't spend bandwidth
-  // on it during a quiet Tuesday morning.
+  // when there's at least one live game on screen, OR exactly one game is
+  // pinned (so the highlight reel for the featured game can render). We
+  // skip on a quiet Tuesday morning so we don't spend bandwidth on it.
   const { data: newsData } = useQuery({
     queryKey: ["/api/news/key-moments", selectedSport],
     queryFn: async () => {
       const suffix = selectedSport !== "all" ? `&sport=${encodeURIComponent(selectedSport)}` : "";
       return fetchJson<{ articles: NewsArticle[] }>(`/api/news?limit=30${suffix}`);
     },
-    enabled: liveCount > 0,
+    enabled: liveCount > 0 || pinnedIds.length === 1,
     refetchInterval: 90_000,
     staleTime: 60_000,
   });
@@ -318,6 +334,24 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
     const articles = newsData?.articles ?? [];
     return articles.filter(isKeyMoment).slice(0, 8);
   }, [newsData]);
+
+  // Highlight reel for the *single* featured game — only renders when
+  // exactly one game is pinned so it acts as the "what just happened in
+  // this game" feed users would otherwise hunt for. We loosen the key-
+  // moment filter on team-matched stories: if a headline names the team,
+  // we trust it even without a literal "TD" / "goal" / "homer" keyword.
+  const featuredGame = useMemo(() => {
+    if (pinnedIds.length !== 1) return null;
+    return scores.find(s => s.id === pinnedIds[0]) ?? null;
+  }, [pinnedIds, scores]);
+
+  const featuredHighlights = useMemo(() => {
+    if (!featuredGame) return [];
+    const articles = newsData?.articles ?? [];
+    return articles
+      .filter(a => articleMentionsGame(a, featuredGame.awayTeam, featuredGame.homeTeam))
+      .slice(0, 6);
+  }, [featuredGame, newsData]);
 
   // Tick once a second so the "Updated Xs ago" caption stays accurate
   // without re-fetching. The query itself only re-runs every 60s.
@@ -532,6 +566,49 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
                         onTogglePin={togglePin}
                       />
                     ))}
+                  </div>
+                )}
+
+                {/* Highlight reel — short-form snackable cards that summarize
+                    "what just happened in this game". Only when exactly one
+                    game is pinned, so the reel always has a definite subject. */}
+                {featuredGame && featuredHighlights.length > 0 && (
+                  <div className="space-y-1.5" data-testid="reel-featured-highlights">
+                    <div className="flex items-center gap-1.5 px-1">
+                      <Flame className="w-3.5 h-3.5 text-primary" />
+                      <span className="text-[11px] font-bold text-primary uppercase tracking-wider">
+                        Highlights · {featuredGame.awayTeam} @ {featuredGame.homeTeam}
+                      </span>
+                    </div>
+                    <div className="scroll-row">
+                      {featuredHighlights.map(h => {
+                        const Tag: any = h.url ? "a" : "div";
+                        return (
+                          <Tag
+                            key={h.id}
+                            href={h.url}
+                            target={h.url ? "_blank" : undefined}
+                            rel={h.url ? "noopener noreferrer" : undefined}
+                            className={cn(
+                              "flex-shrink-0 w-[280px] glass-card px-3 py-2.5 transition-all border-primary/20",
+                              h.url && "hover:border-primary/40 cursor-pointer"
+                            )}
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
+                                {h.source ?? "Update"}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground tabular-nums">
+                                {relativeTime(h.publishedAt)}
+                              </span>
+                            </div>
+                            <p className="text-xs font-medium text-foreground leading-snug line-clamp-3">
+                              {h.title}
+                            </p>
+                          </Tag>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
                 {live.map(score => (
