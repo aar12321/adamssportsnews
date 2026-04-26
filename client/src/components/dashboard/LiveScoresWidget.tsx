@@ -1,9 +1,46 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Clock, ChevronRight, Wifi, AlertCircle } from "lucide-react";
+import { RefreshCw, Clock, ChevronRight, Wifi, AlertCircle, Flame } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/lib/queryClient";
 import type { SportId } from "@shared/schema";
+
+// Words that strongly imply "something just happened in a game" — touchdowns,
+// goals, ejections, walk-offs. Used to spot the headlines worth surfacing
+// right next to the live scoreboard.
+const LIVE_MOMENT_KEYWORDS = [
+  "touchdown", " td ", "goal", "scored", "scores", "score", "home run", "homer",
+  "walk-off", "walkoff", "buzzer beater", "buzzer-beater", "game winner", "game-winning",
+  "ejected", "red card", "hat trick", "grand slam", "pick-six", "pick six",
+  "field goal", "interception", "fumble", "safety", "overtime", "ot ", " ko ",
+  "knockout", "stoppage time", "extra time", "penalty",
+];
+
+interface NewsArticle {
+  id: string;
+  title: string;
+  publishedAt?: string;
+  url?: string;
+  sportId?: string;
+  source?: string;
+  tags?: string[];
+}
+
+function isKeyMoment(article: NewsArticle): boolean {
+  const haystack = `${article.title} ${(article.tags || []).join(" ")}`.toLowerCase();
+  return LIVE_MOMENT_KEYWORDS.some(k => haystack.includes(k));
+}
+
+function relativeTime(iso?: string): string {
+  if (!iso) return "now";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "now";
+  const m = Math.floor(ms / 60_000);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
 
 const SPORT_LABELS: Record<string, string> = {
   basketball: "NBA",
@@ -128,6 +165,25 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
   const scores: Score[] = data?.scores || [];
   const liveCount = scores.filter(s => s.status === "live").length;
 
+  // Key moments strip — TDs, goals, walk-offs from the news feed. Only fetch
+  // when there's at least one live game on screen so we don't spend bandwidth
+  // on it during a quiet Tuesday morning.
+  const { data: newsData } = useQuery({
+    queryKey: ["/api/news/key-moments", selectedSport],
+    queryFn: async () => {
+      const suffix = selectedSport !== "all" ? `&sport=${encodeURIComponent(selectedSport)}` : "";
+      return fetchJson<{ articles: NewsArticle[] }>(`/api/news?limit=30${suffix}`);
+    },
+    enabled: liveCount > 0,
+    refetchInterval: 90_000,
+    staleTime: 60_000,
+  });
+
+  const keyMoments = useMemo(() => {
+    const articles = newsData?.articles ?? [];
+    return articles.filter(isKeyMoment).slice(0, 8);
+  }, [newsData]);
+
   // Tick once a second so the "Updated Xs ago" caption stays accurate
   // without re-fetching. The query itself only re-runs every 60s.
   const [, forceTick] = useState(0);
@@ -200,6 +256,46 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
           </button>
         ))}
       </div>
+
+      {/* Key moments — only when there's something live. Hidden if no
+          impact-worthy headlines were detected so it doesn't sit empty. */}
+      {liveCount > 0 && keyMoments.length > 0 && (
+        <div className="space-y-1.5" data-testid="strip-key-moments">
+          <div className="flex items-center gap-1.5 px-1">
+            <Flame className="w-3.5 h-3.5 text-orange-400" />
+            <span className="text-[11px] font-bold text-orange-400 uppercase tracking-wider">Key moments</span>
+          </div>
+          <div className="scroll-row">
+            {keyMoments.map(m => {
+              const Tag: any = m.url ? "a" : "div";
+              return (
+                <Tag
+                  key={m.id}
+                  href={m.url}
+                  target={m.url ? "_blank" : undefined}
+                  rel={m.url ? "noopener noreferrer" : undefined}
+                  className={cn(
+                    "flex-shrink-0 max-w-[260px] glass-card px-3 py-2 transition-all",
+                    m.url && "hover:border-orange-500/40 cursor-pointer"
+                  )}
+                >
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400">
+                      {SPORT_LABELS[m.sportId || ""] || m.sportId || "Live"}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {relativeTime(m.publishedAt)}
+                    </span>
+                  </div>
+                  <p className="text-xs font-medium text-foreground leading-snug line-clamp-2">
+                    {m.title}
+                  </p>
+                </Tag>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Scores list */}
       {isLoading ? (
