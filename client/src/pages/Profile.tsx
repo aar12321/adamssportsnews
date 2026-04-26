@@ -695,6 +695,42 @@ export default function Profile() {
           {/* Notifications */}
           {activeSection === "notifications" && (
             <Section title="Notifications" icon={Bell}>
+              {/* Master volume dial for the news feed and alerts. Sits above
+                  the per-category toggles because it gates everything below
+                  it — picking "Breaking only" here will keep the feed quiet
+                  even if every toggle stays on. */}
+              <div className="mb-5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 block">
+                  Alert intensity
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { value: "breaking", label: "Breaking only", hint: "The siren stuff" },
+                    { value: "important", label: "Important", hint: "Breaking + injuries + trades" },
+                    { value: "all", label: "All", hint: "Every story" },
+                  ] as const).map(opt => {
+                    const active = preferences.notifications.alertIntensity === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => updateNotifications({ alertIntensity: opt.value })}
+                        aria-pressed={active}
+                        data-testid={`button-intensity-${opt.value}`}
+                        className={cn(
+                          "rounded-xl border p-3 text-left transition-all",
+                          active
+                            ? "bg-primary/15 border-primary text-foreground"
+                            : "bg-muted border-transparent text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        <div className="text-sm font-semibold">{opt.label}</div>
+                        <div className="text-[11px] mt-0.5 opacity-80">{opt.hint}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <div className="space-y-1 divide-y divide-border">
                 <Toggle
                   label="Live Score Alerts"
