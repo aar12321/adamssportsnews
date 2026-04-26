@@ -7,6 +7,7 @@ import { apiManager } from "./apiManager";
 import { bettingService } from "./bettingService";
 import { fantasyService } from "./fantasyService";
 import { analystService } from "./analystService";
+import { picksService } from "./picksService";
 import { userPreferencesService } from "./userPreferencesService";
 import { espnSportsData } from "./espnSportsData";
 import { sportIdSchema, type SportId } from "@shared/schema";
@@ -238,6 +239,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error("Error building daily recap:", err);
       res.status(500).json({ error: "Failed to build daily recap" });
+    }
+  });
+
+  // ==================== PICK 'EM ====================
+  // Daily winner-pick contest. Three reads (slate, my picks, leaderboard)
+  // and one write (submit). Settlement runs implicitly on every leaderboard
+  // request, plus a manual /settle endpoint for ops to kick.
+
+  app.get("/api/picks/today", async (req, res) => {
+    try {
+      const { sport: sportId, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+      const slate = await picksService.getTodaySlate(sportId);
+      res.json({ games: slate, sport: sportId || "all", generatedAt: new Date().toISOString() });
+    } catch (err) {
+      console.error("Error loading pick'em slate:", err);
+      res.status(500).json({ error: "Failed to load pick'em slate" });
+    }
+  });
+
+  app.get("/api/picks/user/:userId", requireSelf, (req, res) => {
+    try {
+      if (!isValidUserId(req.params.userId)) {
+        return res.status(400).json({ error: "Invalid userId" });
+      }
+      res.json({ picks: picksService.forUser(req.params.userId) });
+    } catch (err) {
+      console.error("Error loading user picks:", err);
+      res.status(500).json({ error: "Failed to load user picks" });
+    }
+  });
+
+  app.post("/api/picks/user/:userId", requireSelf, (req, res) => {
+    try {
+      if (!isValidUserId(req.params.userId)) {
+        return res.status(400).json({ error: "Invalid userId" });
+      }
+      const body = req.body ?? {};
+      const required = ["gameId", "selection", "homeTeam", "awayTeam", "startTime"] as const;
+      for (const k of required) {
+        if (typeof body[k] !== "string" || body[k].length === 0) {
+          return res.status(400).json({ error: `${k} is required` });
+        }
+      }
+      const result = picksService.submit({
+        userId: req.params.userId,
+        displayName: typeof body.displayName === "string" && body.displayName.length > 0
+          ? body.displayName.slice(0, 64)
+          : req.params.userId,
+        gameId: body.gameId,
+        selection: body.selection,
+        homeTeam: body.homeTeam,
+        awayTeam: body.awayTeam,
+        startTime: body.startTime,
+      });
+      if (!result.ok) return res.status(400).json({ error: result.error });
+      res.status(201).json({ pick: result.pick });
+    } catch (err) {
+      console.error("Error submitting pick:", err);
+      res.status(500).json({ error: "Failed to submit pick" });
+    }
+  });
+
+  app.get("/api/picks/leaderboard", async (req, res) => {
+    try {
+      const limit = clampInt(req.query.limit, 25, 1, 100);
+      const board = await picksService.leaderboard(limit);
+      res.json({ leaderboard: board, generatedAt: new Date().toISOString() });
+    } catch (err) {
+      console.error("Error loading pick'em leaderboard:", err);
+      res.status(500).json({ error: "Failed to load leaderboard" });
+    }
+  });
+
+  app.post("/api/picks/settle", async (_req, res) => {
+    try {
+      const result = await picksService.settleFinishedGames();
+      res.json(result);
+    } catch (err) {
+      console.error("Error settling picks:", err);
+      res.status(500).json({ error: "Failed to settle picks" });
     }
   });
 
