@@ -326,6 +326,49 @@ export interface UserPreferences {
   };
 }
 
+// ==================== PICK 'EM ====================
+// Daily/weekly winner-pick contest. The flow is intentionally simple:
+//   1. Server publishes a daily slate (today's scheduled games per sport)
+//   2. User submits one pick per game before kickoff
+//   3. As games finish, the server marks each pick won / lost / push
+//   4. The leaderboard sums correct picks per user
+
+export type PickResult = "pending" | "won" | "lost" | "push";
+
+export interface PickableGame {
+  /** Stable id matching the live-scores feed so picks can be settled later. */
+  gameId: string;
+  sportId: SportId;
+  league: string;
+  homeTeam: string;
+  awayTeam: string;
+  /** ISO start time. Picks lock at this moment. */
+  startTime: string;
+  /** Server-provided "lock" flag — true once startTime has passed. */
+  locked: boolean;
+}
+
+export interface UserPick {
+  userId: string;
+  /** Display name captured at submission time so the leaderboard can render
+   *  without a second join even when the user renames themselves later. */
+  displayName: string;
+  gameId: string;
+  /** Exactly the team string the user picked — must match home or away. */
+  selection: string;
+  submittedAt: string;
+  result: PickResult;
+}
+
+export interface PickLeaderboardEntry {
+  userId: string;
+  displayName: string;
+  correct: number;
+  total: number;
+  /** Best streak of consecutive correct picks (resets on lost/push). */
+  streak: number;
+}
+
 // Filter types
 export type TimeRange = "24h" | "3d" | "7d";
 
