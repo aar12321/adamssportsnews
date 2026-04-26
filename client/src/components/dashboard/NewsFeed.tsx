@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { fetchJson } from "@/lib/queryClient";
 import type { SportId } from "@shared/schema";
 import { useUserPreferences } from "@/contexts/UserPreferencesContext";
+import { getHabits, scoreArticle } from "@/lib/newsHabits";
 import NewsCard, { type NewsCategory } from "./NewsCard";
 
 // Categories admitted by each alert-intensity tier. "all" lets every detected
@@ -150,6 +151,25 @@ export default function NewsFeed({ categories, count, sports }: NewsFeedProps) {
         a.description?.toLowerCase().includes(q) ||
         a.source?.toLowerCase().includes(q)
       );
+    }
+
+    // Habit-aware ordering — promote articles whose sport / source /
+    // category match the user's running counts. Stable on ties so the
+    // server's chronological ordering still shows through, and the
+    // weights are intentionally small so a brand-new breaking story
+    // can't get buried under last week's reading habit.
+    if (articles.length > 1) {
+      const habits = getHabits();
+      const indexed = articles.map((a, idx) => ({
+        a,
+        idx,
+        score: scoreArticle(habits, a),
+      }));
+      indexed.sort((x, y) => {
+        if (y.score !== x.score) return y.score - x.score;
+        return x.idx - y.idx;
+      });
+      articles = indexed.map(e => e.a);
     }
 
     return articles.slice(0, count);
