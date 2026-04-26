@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Clock, ChevronRight, Wifi, AlertCircle, Flame, Pin, PinOff } from "lucide-react";
+import { RefreshCw, Clock, ChevronRight, Wifi, AlertCircle, Flame, Pin, PinOff, Zap, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/lib/queryClient";
 import type { SportId } from "@shared/schema";
@@ -243,6 +243,63 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
   const scores: Score[] = data?.scores || [];
   const liveCount = scores.filter(s => s.status === "live").length;
 
+  // Score-swing alert — when a pinned game's score changes between polls,
+  // surface a one-line "jump to action" banner so the user knows something
+  // happened without staring at the page. Tracking is per-pin so the user
+  // gets a banner per game, not one global alert. The first observation
+  // primes the cache (no banner) so we don't fire on initial mount.
+  type SwingAlert = { id: string; label: string; ts: number };
+  const lastSeenScoresRef = useRef<Map<string, { home: number | null; away: number | null }>>(new Map());
+  const [swingAlerts, setSwingAlerts] = useState<SwingAlert[]>([]);
+
+  useEffect(() => {
+    if (!data?.scores) return;
+    const next: SwingAlert[] = [];
+    const seen = lastSeenScoresRef.current;
+    for (const id of pinnedIds) {
+      const game = data.scores.find(s => s.id === id);
+      if (!game) continue;
+      const prev = seen.get(id);
+      const curr = { home: game.homeScore, away: game.awayScore };
+      seen.set(id, curr);
+      if (!prev) continue; // first observation primes the cache silently
+      if (game.status !== "live") continue;
+      const dHome = (curr.home ?? 0) - (prev.home ?? 0);
+      const dAway = (curr.away ?? 0) - (prev.away ?? 0);
+      if (dHome <= 0 && dAway <= 0) continue;
+      const scorerSide = dHome >= dAway ? game.homeTeam : game.awayTeam;
+      const points = Math.max(dHome, dAway);
+      next.push({
+        id,
+        label: `${scorerSide} +${points} — ${game.awayTeam} ${curr.away ?? 0} – ${curr.home ?? 0} ${game.homeTeam}`,
+        ts: Date.now(),
+      });
+    }
+    if (next.length === 0) return;
+    setSwingAlerts(prev => {
+      // Keep only the most recent alert per game id, newest first, capped at 3.
+      const merged = [...next, ...prev].reduce<SwingAlert[]>((acc, a) => {
+        if (acc.find(x => x.id === a.id)) return acc;
+        return [...acc, a];
+      }, []);
+      return merged.slice(0, 3);
+    });
+  }, [data?.scores, pinnedIds]);
+
+  // Auto-clear each alert after 25 seconds so the banner doesn't pile up
+  // and the dashboard returns to its calm baseline.
+  useEffect(() => {
+    if (swingAlerts.length === 0) return;
+    const timer = setTimeout(() => {
+      setSwingAlerts(prev => prev.filter(a => Date.now() - a.ts < 25_000));
+    }, 5_000);
+    return () => clearTimeout(timer);
+  }, [swingAlerts]);
+
+  const dismissSwing = useCallback((id: string) => {
+    setSwingAlerts(prev => prev.filter(a => a.id !== id));
+  }, []);
+
   // Key moments strip — TDs, goals, walk-offs from the news feed. Only fetch
   // when there's at least one live game on screen so we don't spend bandwidth
   // on it during a quiet Tuesday morning.
@@ -334,6 +391,35 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
           </button>
         ))}
       </div>
+
+      {/* Score-swing alerts for pinned games — appears above key moments
+          so the "something just happened" signal lands closest to the
+          scoreboard the user is watching. */}
+      {swingAlerts.length > 0 && (
+        <div className="space-y-1.5" data-testid="alerts-score-swings">
+          {swingAlerts.map(alert => (
+            <div
+              key={alert.id}
+              role="status"
+              aria-live="polite"
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-green-500/10 border border-green-500/30 animate-fade-in"
+            >
+              <Zap className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+              <span className="text-xs font-medium text-foreground flex-1 leading-snug">
+                {alert.label}
+              </span>
+              <button
+                type="button"
+                onClick={() => dismissSwing(alert.id)}
+                aria-label="Dismiss"
+                className="w-5 h-5 rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center transition-all"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Key moments — only when there's something live. Hidden if no
           impact-worthy headlines were detected so it doesn't sit empty. */}
