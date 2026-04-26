@@ -21,6 +21,7 @@ const Apps = lazy(() => import("@/pages/Apps"));
 const BettingApp = lazy(() => import("@/pages/apps/BettingApp"));
 const FantasyApp = lazy(() => import("@/pages/apps/FantasyApp"));
 const AnalystApp = lazy(() => import("@/pages/apps/AnalystApp"));
+const PickEmApp = lazy(() => import("@/pages/apps/PickEmApp"));
 const Profile = lazy(() => import("@/pages/Profile"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
 
@@ -42,6 +43,7 @@ function Router() {
           <Route path="/apps/betting" component={BettingApp} />
           <Route path="/apps/fantasy" component={FantasyApp} />
           <Route path="/apps/analyst" component={AnalystApp} />
+          <Route path="/apps/pickem" component={PickEmApp} />
           <Route path="/profile" component={Profile} />
           <Route component={Dashboard} />
         </Switch>
