@@ -1,10 +1,21 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Search, Filter, Zap, AlertTriangle, ArrowLeftRight, MessageCircle, Newspaper, AlertCircle } from "lucide-react";
+import { RefreshCw, Search, Filter, Zap, AlertTriangle, ArrowLeftRight, MessageCircle, Newspaper, AlertCircle, BellRing } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/lib/queryClient";
 import type { SportId } from "@shared/schema";
+import { useUserPreferences } from "@/contexts/UserPreferencesContext";
 import NewsCard, { type NewsCategory } from "./NewsCard";
+
+// Categories admitted by each alert-intensity tier. "all" lets every detected
+// category through; the stricter tiers narrow it down to the moves that
+// actually change a fan's day.
+const TIER_CATEGORIES: Record<"breaking" | "important" | "all", NewsCategory[] | null> = {
+  breaking: ["breaking"],
+  important: ["breaking", "injury", "trade"],
+  all: null,
+};
 
 const CATEGORIES: { key: NewsCategory; label: string; Icon: any }[] = [
   { key: "breaking", label: "Breaking", Icon: Zap },
@@ -48,6 +59,19 @@ export default function NewsFeed({ categories, count, sports }: NewsFeedProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [activeSport, setActiveSport] = useState<SportId | "all">("all");
+  const { preferences } = useUserPreferences();
+  const intensity = preferences.notifications.alertIntensity;
+  const tierAllowed = TIER_CATEGORIES[intensity];
+
+  // If the active category chip is no longer admitted by the current tier
+  // (e.g. user picked "rumor" then switched intensity to "important"), drop
+  // it back to "all" so the feed can't render an empty state on its own
+  // selection.
+  useEffect(() => {
+    if (tierAllowed && activeCategory !== "all" && !tierAllowed.includes(activeCategory)) {
+      setActiveCategory("all");
+    }
+  }, [tierAllowed, activeCategory]);
 
   // If the user changes their favourite sports in Profile, drop a stale
   // sport-chip selection so the feed can't silently exclude everything.
@@ -102,6 +126,12 @@ export default function NewsFeed({ categories, count, sports }: NewsFeedProps) {
   const filteredArticles = useMemo(() => {
     let articles = processedArticles;
 
+    // Alert-intensity tier comes first — it gates everything below it,
+    // including the category chips, so a stricter tier always wins.
+    if (tierAllowed) {
+      articles = articles.filter(a => tierAllowed.includes(a.detectedCategory));
+    }
+
     // Filter by enabled categories from preferences
     if (categories.length > 0) {
       articles = articles.filter(a => categories.includes(a.detectedCategory));
@@ -123,7 +153,7 @@ export default function NewsFeed({ categories, count, sports }: NewsFeedProps) {
     }
 
     return articles.slice(0, count);
-  }, [processedArticles, activeCategory, searchQuery, categories, count]);
+  }, [processedArticles, activeCategory, searchQuery, categories, count, tierAllowed]);
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -212,6 +242,22 @@ export default function NewsFeed({ categories, count, sports }: NewsFeedProps) {
         </div>
       )}
 
+      {/* Intensity tier indicator — only when the user has narrowed the feed.
+          Links straight to Profile so they can change it from where they
+          notice the effect. */}
+      {tierAllowed && (
+        <Link
+          href="/profile"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15 transition-all"
+          aria-label={`Alert intensity is ${intensity}. Change in profile.`}
+          data-testid="link-news-intensity"
+        >
+          <BellRing className="w-3 h-3" />
+          {intensity === "breaking" ? "Breaking only" : "Important only"}
+          <span className="text-muted-foreground font-normal">· change</span>
+        </Link>
+      )}
+
       {/* Category filters */}
       <div className="scroll-row">
         <button
@@ -225,30 +271,39 @@ export default function NewsFeed({ categories, count, sports }: NewsFeedProps) {
         >
           All {processedArticles.length > 0 && `(${processedArticles.length})`}
         </button>
-        {CATEGORIES.filter(c => categories.includes(c.key) || categories.length === 0).map(({ key, label, Icon }) => (
-          <button
-            key={key}
-            onClick={() => setActiveCategory(key === activeCategory ? "all" : key)}
-            className={cn(
-              "flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all",
-              activeCategory === key
-                ? cn("border", key === "breaking" ? "bg-red-500/20 text-red-400 border-red-500/30" :
-                   key === "injury" ? "bg-orange-500/20 text-orange-400 border-orange-500/30" :
-                   key === "trade" ? "bg-purple-500/20 text-purple-400 border-purple-500/30" :
-                   key === "rumor" ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" :
-                   "bg-blue-500/20 text-blue-400 border-blue-500/30")
-                : "bg-muted border-transparent text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <Icon className="w-3 h-3" />
-            {label}
-            {categoryCounts[key] && (
-              <span className="bg-muted-foreground/20 text-xs px-1.5 py-0.5 rounded-full num">
-                {categoryCounts[key]}
-              </span>
-            )}
-          </button>
-        ))}
+        {CATEGORIES.filter(c => categories.includes(c.key) || categories.length === 0).map(({ key, label, Icon }) => {
+          // Tier excludes this chip — keep it visible but unselectable so the
+          // user understands which categories the current intensity admits.
+          const tierExcluded = tierAllowed != null && !tierAllowed.includes(key);
+          return (
+            <button
+              key={key}
+              onClick={() => !tierExcluded && setActiveCategory(key === activeCategory ? "all" : key)}
+              disabled={tierExcluded}
+              aria-disabled={tierExcluded}
+              title={tierExcluded ? `Hidden by '${intensity}' alert intensity` : undefined}
+              className={cn(
+                "flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all",
+                tierExcluded && "opacity-40 cursor-not-allowed",
+                activeCategory === key
+                  ? cn("border", key === "breaking" ? "bg-red-500/20 text-red-400 border-red-500/30" :
+                     key === "injury" ? "bg-orange-500/20 text-orange-400 border-orange-500/30" :
+                     key === "trade" ? "bg-purple-500/20 text-purple-400 border-purple-500/30" :
+                     key === "rumor" ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" :
+                     "bg-blue-500/20 text-blue-400 border-blue-500/30")
+                  : "bg-muted border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Icon className="w-3 h-3" />
+              {label}
+              {categoryCounts[key] && (
+                <span className="bg-muted-foreground/20 text-xs px-1.5 py-0.5 rounded-full num">
+                  {categoryCounts[key]}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* News grid */}
