@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { ExternalLink, ChevronDown, ChevronUp, Clock, Zap, AlertTriangle, ArrowLeftRight, MessageCircle, Newspaper } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { recordArticleOpen } from "@/lib/newsHabits";
 import ArticleModal from "./ArticleModal";
 
 export type NewsCategory = "breaking" | "injury" | "trade" | "rumor" | "news";
@@ -59,7 +60,12 @@ export default function NewsCard({
           "glass-card p-4 cursor-pointer transition-all duration-200 hover:border-primary/30 hover:-translate-y-0.5 hover:shadow-lg animate-fade-in group",
           category === "breaking" && "border-red-500/20"
         )}
-        onClick={() => setShowModal(true)}
+        onClick={() => {
+          // Record locally so the next render of the feed can promote
+          // similar items. Per-tap, fire-and-forget; failures are silent.
+          recordArticleOpen({ sport, category, source });
+          setShowModal(true);
+        }}
       >
         {/* Category badge + time */}
         <div className="flex items-center justify-between mb-3">
