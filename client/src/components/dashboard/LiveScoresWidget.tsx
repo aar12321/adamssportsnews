@@ -173,23 +173,46 @@ interface LiveScoresWidgetProps {
   sports: SportId[];
 }
 
-// Persist the user's pinned-game pick across reloads. One game at a time —
-// "the one I'm watching tonight" — is the simplest and most useful frame.
-const PINNED_GAME_KEY = "live_scores_pinned_game_v1";
+// Persist the user's pinned-game picks across reloads. Up to four games can
+// be pinned at once — Sundays during NFL, the user wants the RedZone-style
+// "track everything that matters at the same time" frame.
+const PINNED_GAME_KEY = "live_scores_pinned_game_v1";        // legacy single id
+const PINNED_GAMES_KEY = "live_scores_pinned_games_v2";      // current array
+const MAX_PINS = 4;
+
+function readPinnedIds(): string[] {
+  try {
+    const raw = localStorage.getItem(PINNED_GAMES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((x): x is string => typeof x === "string").slice(0, MAX_PINS);
+      }
+    }
+    // Migrate legacy single-id pin from v1 forward without losing it.
+    const legacy = localStorage.getItem(PINNED_GAME_KEY);
+    if (legacy) {
+      localStorage.setItem(PINNED_GAMES_KEY, JSON.stringify([legacy]));
+      localStorage.removeItem(PINNED_GAME_KEY);
+      return [legacy];
+    }
+  } catch {}
+  return [];
+}
 
 export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
   const [selectedSport, setSelectedSport] = useState<string>("all");
-  const [pinnedId, setPinnedId] = useState<string | null>(() => {
-    try { return localStorage.getItem(PINNED_GAME_KEY); } catch { return null; }
-  });
+  const [pinnedIds, setPinnedIds] = useState<string[]>(() => readPinnedIds());
 
   const togglePin = useCallback((id: string) => {
-    setPinnedId(prev => {
-      const next = prev === id ? null : id;
-      try {
-        if (next) localStorage.setItem(PINNED_GAME_KEY, next);
-        else localStorage.removeItem(PINNED_GAME_KEY);
-      } catch {}
+    setPinnedIds(prev => {
+      const isPinned = prev.includes(id);
+      // Pinning past the cap silently drops the oldest pin so the user can
+      // keep tapping new games without manually unpinning first.
+      const next = isPinned
+        ? prev.filter(x => x !== id)
+        : [...prev, id].slice(-MAX_PINS);
+      try { localStorage.setItem(PINNED_GAMES_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
   }, []);
@@ -392,24 +415,38 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
         </div>
       ) : (
         <div className="space-y-3">
-          {/* Pinned/featured game floats above everything else and renders
-              larger so the user can park their eyes on the one they care
-              about. */}
+          {/* Pinned/featured games float above everything else. With one pin
+              the card renders large; with two-to-four it switches to a 2-col
+              grid (RedZone-style multi-track) so the user can watch every
+              game that matters at the same time. */}
           {(() => {
-            const pinned = pinnedId ? scores.find(s => s.id === pinnedId) : null;
-            const live = scores.filter(s => s.status === "live" && s.id !== pinnedId);
-            const upcoming = scores.filter(s => s.status === "scheduled" && s.id !== pinnedId).slice(0, 3);
-            const finished = scores.filter(s => s.status === "finished" && s.id !== pinnedId).slice(0, 3);
+            const pinSet = new Set(pinnedIds);
+            const pinnedScores = pinnedIds
+              .map(id => scores.find(s => s.id === id))
+              .filter((s): s is Score => Boolean(s));
+            const live = scores.filter(s => s.status === "live" && !pinSet.has(s.id));
+            const upcoming = scores.filter(s => s.status === "scheduled" && !pinSet.has(s.id)).slice(0, 3);
+            const finished = scores.filter(s => s.status === "finished" && !pinSet.has(s.id)).slice(0, 3);
+            const multiPin = pinnedScores.length > 1;
             return (
               <>
-                {pinned && (
-                  <ScoreCard
-                    key={pinned.id}
-                    score={pinned}
-                    pinned
-                    featured
-                    onTogglePin={togglePin}
-                  />
+                {pinnedScores.length > 0 && (
+                  <div
+                    className={cn(
+                      multiPin ? "grid grid-cols-1 sm:grid-cols-2 gap-3" : "block"
+                    )}
+                    data-testid="row-pinned-games"
+                  >
+                    {pinnedScores.map(score => (
+                      <ScoreCard
+                        key={score.id}
+                        score={score}
+                        pinned
+                        featured={!multiPin}
+                        onTogglePin={togglePin}
+                      />
+                    ))}
+                  </div>
                 )}
                 {live.map(score => (
                   <ScoreCard key={score.id} score={score} pinned={false} onTogglePin={togglePin} />
