@@ -183,6 +183,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== DAILY RECAP ====================
+  // "What you missed today" — combines the games that just finished with
+  // the day's biggest stories so a user who closed the app at noon can
+  // catch up in 30 seconds without scrolling the full feed.
+  app.get("/api/recap/today", async (req, res) => {
+    try {
+      const { sport: sportId, error } = parseSportQuery(req.query.sport);
+      if (error) return res.status(400).json({ error });
+
+      const since = Date.now() - 24 * 60 * 60 * 1000;
+      const [scores, allArticles] = await Promise.all([
+        scoresService.getLiveScores(sportId, true),
+        newsService.getLatestNews(sportId, 80, true),
+      ]);
+
+      // Final scores from the last 24h, biggest blowouts first so a fan
+      // skimming sees the games that mattered before the close ones.
+      const finals = scores
+        .filter((s) => s.status === "finished")
+        .filter((s) => {
+          if (!s.startTime) return true;
+          const t = new Date(s.startTime).getTime();
+          return Number.isFinite(t) ? t >= since : true;
+        })
+        .map((s) => ({
+          ...s,
+          margin:
+            s.homeScore !== null && s.awayScore !== null
+              ? Math.abs((s.homeScore as number) - (s.awayScore as number))
+              : 0,
+        }))
+        .sort((a, b) => b.margin - a.margin)
+        .slice(0, 5);
+
+      // Breaking + injury + trade only — the moves that change a fan's
+      // day. Cap to 5 so the dashboard card stays scannable.
+      const tierLabels = ["breaking", "injury", "trade"];
+      const stories = allArticles
+        .filter((a) => {
+          const text = `${a.title || ""} ${a.description || ""} ${(a.tags || []).join(" ")}`.toLowerCase();
+          if (a.publishedAt && new Date(a.publishedAt).getTime() < since) return false;
+          return tierLabels.some((label) => text.includes(label)) ||
+            text.includes("hurt") || text.includes("traded") || text.includes("acquired");
+        })
+        .slice(0, 5);
+
+      res.json({
+        finals,
+        stories,
+        sport: sportId || "all",
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error("Error building daily recap:", err);
+      res.status(500).json({ error: "Failed to build daily recap" });
+    }
+  });
+
   // ==================== BETTING ====================
 
   app.get("/api/betting/schedule", async (req, res) => {
