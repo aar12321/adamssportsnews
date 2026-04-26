@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Clock, ChevronRight, Wifi, AlertCircle, Flame } from "lucide-react";
+import { RefreshCw, Clock, ChevronRight, Wifi, AlertCircle, Flame, Pin, PinOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/lib/queryClient";
 import type { SportId } from "@shared/schema";
@@ -71,28 +71,48 @@ interface Score {
   period?: string;
 }
 
-function ScoreCard({ score }: { score: Score }) {
+interface ScoreCardProps {
+  score: Score;
+  pinned: boolean;
+  featured?: boolean;
+  onTogglePin: (id: string) => void;
+}
+
+function ScoreCard({ score, pinned, featured, onTogglePin }: ScoreCardProps) {
   const isLive = score.status === "live";
   const isFinished = score.status === "finished";
   const homeWins = isFinished && score.homeScore !== null && score.awayScore !== null && score.homeScore > score.awayScore;
   const awayWins = isFinished && score.homeScore !== null && score.awayScore !== null && score.awayScore > score.homeScore;
 
+  const PinIcon = pinned ? PinOff : Pin;
+  const teamFontClass = featured ? "text-base" : "text-sm";
+  const scoreFontClass = featured ? "text-3xl" : "text-lg";
+
   return (
     <div className={cn(
-      "glass-card p-4 transition-all duration-200 hover:border-primary/30",
-      isLive && "border-green-500/30 bg-green-500/5"
+      "glass-card transition-all duration-200 hover:border-primary/30",
+      featured ? "p-5 border-primary/30 bg-primary/5" : "p-4",
+      isLive && !featured && "border-green-500/30 bg-green-500/5",
+      isLive && featured && "border-green-500/40 bg-green-500/10"
     )}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
-        <span className={cn("text-xs font-semibold uppercase tracking-wider", SPORT_COLORS[score.sportId] || "text-muted-foreground")}>
-          {score.league}
-        </span>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
+          {featured && (
+            <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/20 text-primary">
+              Featured
+            </span>
+          )}
+          <span className={cn("text-xs font-semibold uppercase tracking-wider", SPORT_COLORS[score.sportId] || "text-muted-foreground")}>
+            {score.league}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
           {isLive ? (
-            <>
+            <div className="flex items-center gap-1.5">
               <span className="live-dot" />
               <span className="text-xs font-bold text-green-400">{score.period || "LIVE"}</span>
-            </>
+            </div>
           ) : isFinished ? (
             <span className="text-xs text-muted-foreground font-medium">FINAL</span>
           ) : (
@@ -103,24 +123,41 @@ function ScoreCard({ score }: { score: Score }) {
               </span>
             </div>
           )}
+          <button
+            type="button"
+            onClick={() => onTogglePin(score.id)}
+            aria-label={pinned ? `Unpin ${score.awayTeam} at ${score.homeTeam}` : `Pin ${score.awayTeam} at ${score.homeTeam} to top`}
+            aria-pressed={pinned}
+            data-testid={`button-pin-${score.id}`}
+            className={cn(
+              "w-6 h-6 rounded-md flex items-center justify-center transition-all",
+              pinned
+                ? "bg-primary/20 text-primary hover:bg-primary/30"
+                : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"
+            )}
+          >
+            <PinIcon className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
       {/* Teams & Scores */}
-      <div className="space-y-2">
+      <div className={featured ? "space-y-3" : "space-y-2"}>
         {[
           { team: score.awayTeam, score: score.awayScore, wins: awayWins },
           { team: score.homeTeam, score: score.homeScore, wins: homeWins },
         ].map(({ team, score: sc, wins }) => (
           <div key={team} className="flex items-center justify-between">
             <span className={cn(
-              "text-sm font-medium truncate max-w-[150px]",
+              "font-medium truncate max-w-[180px]",
+              teamFontClass,
               wins ? "text-foreground font-bold" : "text-muted-foreground"
             )}>
               {team}
             </span>
             <span className={cn(
-              "text-lg font-bold num tabular-nums min-w-[32px] text-right",
+              "font-bold num tabular-nums min-w-[44px] text-right",
+              scoreFontClass,
               wins ? "text-foreground" : sc !== null ? "text-muted-foreground" : "text-muted-foreground/50"
             )}>
               {sc !== null ? sc : "-"}
@@ -136,8 +173,26 @@ interface LiveScoresWidgetProps {
   sports: SportId[];
 }
 
+// Persist the user's pinned-game pick across reloads. One game at a time —
+// "the one I'm watching tonight" — is the simplest and most useful frame.
+const PINNED_GAME_KEY = "live_scores_pinned_game_v1";
+
 export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
   const [selectedSport, setSelectedSport] = useState<string>("all");
+  const [pinnedId, setPinnedId] = useState<string | null>(() => {
+    try { return localStorage.getItem(PINNED_GAME_KEY); } catch { return null; }
+  });
+
+  const togglePin = useCallback((id: string) => {
+    setPinnedId(prev => {
+      const next = prev === id ? null : id;
+      try {
+        if (next) localStorage.setItem(PINNED_GAME_KEY, next);
+        else localStorage.removeItem(PINNED_GAME_KEY);
+      } catch {}
+      return next;
+    });
+  }, []);
 
   const displaySports = ["all", ...sports];
 
@@ -337,18 +392,37 @@ export default function LiveScoresWidget({ sports }: LiveScoresWidgetProps) {
         </div>
       ) : (
         <div className="space-y-3">
-          {/* Live games first */}
-          {scores.filter(s => s.status === "live").map(score => (
-            <ScoreCard key={score.id} score={score} />
-          ))}
-          {/* Then upcoming */}
-          {scores.filter(s => s.status === "scheduled").slice(0, 3).map(score => (
-            <ScoreCard key={score.id} score={score} />
-          ))}
-          {/* Then finished */}
-          {scores.filter(s => s.status === "finished").slice(0, 3).map(score => (
-            <ScoreCard key={score.id} score={score} />
-          ))}
+          {/* Pinned/featured game floats above everything else and renders
+              larger so the user can park their eyes on the one they care
+              about. */}
+          {(() => {
+            const pinned = pinnedId ? scores.find(s => s.id === pinnedId) : null;
+            const live = scores.filter(s => s.status === "live" && s.id !== pinnedId);
+            const upcoming = scores.filter(s => s.status === "scheduled" && s.id !== pinnedId).slice(0, 3);
+            const finished = scores.filter(s => s.status === "finished" && s.id !== pinnedId).slice(0, 3);
+            return (
+              <>
+                {pinned && (
+                  <ScoreCard
+                    key={pinned.id}
+                    score={pinned}
+                    pinned
+                    featured
+                    onTogglePin={togglePin}
+                  />
+                )}
+                {live.map(score => (
+                  <ScoreCard key={score.id} score={score} pinned={false} onTogglePin={togglePin} />
+                ))}
+                {upcoming.map(score => (
+                  <ScoreCard key={score.id} score={score} pinned={false} onTogglePin={togglePin} />
+                ))}
+                {finished.map(score => (
+                  <ScoreCard key={score.id} score={score} pinned={false} onTogglePin={togglePin} />
+                ))}
+              </>
+            );
+          })()}
         </div>
       )}
     </div>
