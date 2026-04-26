@@ -15,6 +15,61 @@ import { Skeleton } from "@/components/ui/skeleton";
 // overview chart, so we lazy-load it to keep the AnalystApp chunk small.
 const TeamsOverviewChart = lazy(() => import("@/components/analyst/TeamsOverviewChart"));
 
+// Plain-English meaning for the stat keys returned by analystService. The
+// goal isn't to teach analytics — it's to give a casual fan one extra line
+// that says "what does this number tell me, and which direction is good?".
+// Lookup is by lower-cased, normalized key so we tolerate camelCase
+// (offRtg) and snake_case (off_rtg) without duplicating entries.
+const STAT_CONTEXT: Record<string, string> = {
+  // Basketball
+  fg_pct: "Shots made as a share of shots taken. Higher = sharper shooting.",
+  three_pct: "Three-point shots made vs attempted. Higher = better outside threat.",
+  ft_pct: "Free throws made vs attempted. Higher = clutch from the line.",
+  rebounds: "Boards per game on both ends. More = more second-chance points and stops.",
+  assists: "Passes that lead directly to a basket. More = better ball movement.",
+  steals: "Possessions taken from the opponent. More = more pressure, more transition.",
+  blocks: "Shots rejected at the rim. More = stronger interior defense.",
+  turnovers: "Possessions given away. Lower = better.",
+  pace: "Possessions per 48 min. Higher = a faster game with more shots.",
+  offrtg: "Points produced per 100 possessions. Higher = better offense.",
+  defrtg: "Points allowed per 100 possessions. Lower = better defense.",
+  // Football
+  pass_yards: "Total yards through the air. Higher = stronger passing attack.",
+  rush_yards: "Total yards on the ground. Higher = stronger run game.",
+  total_yards: "All offense combined. Higher = more reliable scoring chances.",
+  first_downs: "Drives that kept moving. More = sustained drives, fewer punts.",
+  turnovers_forced: "Takeaways the defense generated. More = better.",
+  sacks: "QB takedowns behind the line. More = better pass rush.",
+  third_down_pct: "Third downs converted. Higher = drives stay alive.",
+  redzone_pct: "Trips inside the 20 turned into TDs. Higher = closes the deal.",
+  // Soccer
+  goals: "Goals scored across the season. More = better attack.",
+  shots: "Shots taken across the season. More = more chances created.",
+  shots_on_target: "Shots that forced the keeper to make a play. Higher = sharper attack.",
+  possession_pct: "Average share of possession. Higher = dictates the tempo.",
+  pass_accuracy: "Completed passes vs attempted. Higher = cleaner buildup play.",
+  clean_sheets: "Games conceding no goals. More = stronger defense.",
+  xg: "Expected goals — quality of chances created. Higher = better looks at goal.",
+  // Baseball / Hockey common keys (graceful fallback)
+  era: "Earned runs allowed per 9 innings. Lower = better pitching.",
+  whip: "Walks + hits allowed per inning. Lower = better pitching.",
+  obp: "Times reaching base safely. Higher = harder to retire.",
+  slg: "Total bases per at-bat. Higher = more power.",
+  ops: "On-base + slugging combined. Higher = more total offense.",
+  goals_for: "Goals scored across the season. More = better attack.",
+  goals_against: "Goals conceded. Lower = better defense.",
+  power_play_pct: "Goals scored on the power play. Higher = better with the man advantage.",
+  penalty_kill_pct: "Power plays killed off. Higher = better short-handed.",
+};
+
+function explainStat(key: string): string | null {
+  const norm = key.toLowerCase().replace(/[_\s-]+/g, "_");
+  if (STAT_CONTEXT[norm]) return STAT_CONTEXT[norm];
+  // camelCase → snake_case (offRtg → off_rtg → offrtg lookup)
+  const collapsed = norm.replace(/_/g, "");
+  return STAT_CONTEXT[collapsed] ?? null;
+}
+
 function FormBadges({ form }: { form: string[] }) {
   return (
     <div className="flex items-center gap-1">
@@ -126,16 +181,24 @@ function TeamDetail({ team }: { team: any }) {
       <div className="glass-card p-5">
         <h4 className="font-bold text-foreground mb-3">Statistics</h4>
         <div className="grid grid-cols-2 gap-2">
-          {statEntries.map(([key, value]) => (
-            <div key={key} className="bg-muted/50 rounded-xl p-3">
-              <p className="text-xs text-muted-foreground mb-1">{key.replace(/_/g, " ").toUpperCase()}</p>
-              <p className="text-sm font-bold text-foreground num">
-                {typeof value === "number"
-                  ? (value > 1 ? value.toFixed(1) : (value * 100).toFixed(1) + "%")
-                  : value as string}
-              </p>
-            </div>
-          ))}
+          {statEntries.map(([key, value]) => {
+            const why = explainStat(key);
+            return (
+              <div key={key} className="bg-muted/50 rounded-xl p-3">
+                <p className="text-xs text-muted-foreground mb-1">{key.replace(/_/g, " ").toUpperCase()}</p>
+                <p className="text-sm font-bold text-foreground num">
+                  {typeof value === "number"
+                    ? (value > 1 ? value.toFixed(1) : (value * 100).toFixed(1) + "%")
+                    : value as string}
+                </p>
+                {why && (
+                  <p className="text-[10px] text-muted-foreground/80 mt-1.5 leading-snug" data-testid={`stat-why-${key}`}>
+                    {why}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -483,16 +546,24 @@ function PlayerDetail({ player }: { player: any }) {
       <div className="glass-card p-5">
         <h4 className="font-bold text-foreground mb-3">Statistics</h4>
         <div className="grid grid-cols-2 gap-2">
-          {statEntries.map(([key, value]) => (
-            <div key={key} className="bg-muted/50 rounded-xl p-3">
-              <p className="text-xs text-muted-foreground mb-1">{key.replace(/_/g, " ").toUpperCase()}</p>
-              <p className="text-sm font-bold text-foreground num">
-                {typeof value === "number"
-                  ? (value > 1 ? value.toFixed(1) : (value * 100).toFixed(1) + "%")
-                  : value as string}
-              </p>
-            </div>
-          ))}
+          {statEntries.map(([key, value]) => {
+            const why = explainStat(key);
+            return (
+              <div key={key} className="bg-muted/50 rounded-xl p-3">
+                <p className="text-xs text-muted-foreground mb-1">{key.replace(/_/g, " ").toUpperCase()}</p>
+                <p className="text-sm font-bold text-foreground num">
+                  {typeof value === "number"
+                    ? (value > 1 ? value.toFixed(1) : (value * 100).toFixed(1) + "%")
+                    : value as string}
+                </p>
+                {why && (
+                  <p className="text-[10px] text-muted-foreground/80 mt-1.5 leading-snug" data-testid={`stat-why-${key}`}>
+                    {why}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
