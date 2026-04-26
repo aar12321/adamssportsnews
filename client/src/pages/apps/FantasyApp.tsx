@@ -225,6 +225,49 @@ const STATUS_CONFIG = {
   questionable: { label: "Quest.", className: "text-yellow-400 bg-yellow-500/10" },
 };
 
+// Start/sit hint — a one-line "what would I do?" recommendation derived
+// from data the card already shows (status, trending, projected vs season
+// avg). We deliberately stay quiet when the picture is mixed so the chip
+// doesn't become noise the user learns to ignore.
+type StartSitVerdict = "start" | "sit" | "risky";
+
+function getStartSitHint(player: any): { verdict: StartSitVerdict; reason: string } | null {
+  if (!player) return null;
+  const status: string | undefined = player.status;
+  const trending: string | undefined = player.trending;
+  const projected: number | undefined = typeof player.projectedPoints === "number" ? player.projectedPoints : undefined;
+  const avg: number | undefined = typeof player.averagePoints === "number" ? player.averagePoints : undefined;
+
+  if (status === "out") return { verdict: "sit", reason: "Ruled out for the next game." };
+  if (status === "injured") return { verdict: "sit", reason: "Carrying an injury — bench until cleared." };
+  if (status === "doubtful") return { verdict: "sit", reason: "Doubtful to play. Find a healthier option." };
+  if (status === "questionable") {
+    return { verdict: "risky", reason: "Game-time decision — line up a backup." };
+  }
+
+  if (projected != null && avg != null && avg > 0) {
+    const ratio = projected / avg;
+    if (ratio <= 0.65 && trending === "down") {
+      return { verdict: "sit", reason: `Projected ${projected.toFixed(1)} vs ${avg.toFixed(1)} avg — and trending down.` };
+    }
+    if (ratio <= 0.75) {
+      return { verdict: "risky", reason: `Projection (${projected.toFixed(1)}) well below season pace.` };
+    }
+    if (ratio >= 1.05 && trending !== "down") {
+      const tail = trending === "up" ? " and trending up" : "";
+      return { verdict: "start", reason: `Projected ${projected.toFixed(1)} vs ${avg.toFixed(1)} avg${tail}.` };
+    }
+  }
+
+  return null;
+}
+
+const HINT_STYLE: Record<StartSitVerdict, { label: string; chip: string }> = {
+  start: { label: "Start", chip: "bg-green-500/15 text-green-400 border-green-500/30" },
+  sit:   { label: "Sit",   chip: "bg-red-500/15 text-red-400 border-red-500/30" },
+  risky: { label: "Risky", chip: "bg-orange-500/15 text-orange-400 border-orange-500/30" },
+};
+
 const MemoizedPlayerCard = React.memo(PlayerCard);
 
 function PlayerCard({ player, compact = false, onAdd, onRemove, isOnRoster, onSelect }: {
@@ -234,6 +277,7 @@ function PlayerCard({ player, compact = false, onAdd, onRemove, isOnRoster, onSe
   const trendIcon = player.trending === "up" ? TrendingUp : player.trending === "down" ? TrendingDown : Minus;
   const trendColor = player.trending === "up" ? "text-green-400" : player.trending === "down" ? "text-red-400" : "text-muted-foreground";
   const TrendIcon = trendIcon;
+  const hint = getStartSitHint(player);
 
   if (compact) {
     return (
@@ -310,6 +354,21 @@ function PlayerCard({ player, compact = false, onAdd, onRemove, isOnRoster, onSe
           <p className="text-base font-bold text-foreground num">{player.weeklyPoints != null ? player.weeklyPoints.toFixed(1) : "—"}</p>
         </div>
       </div>
+
+      {/* Start/sit hint — only when the picture is decisively start, sit,
+          or risky. A mixed read returns null above and the section is
+          skipped so the chip doesn't become noise. */}
+      {hint && (
+        <div
+          className={cn("flex items-start gap-2 px-3 py-2 mb-4 rounded-xl border", HINT_STYLE[hint.verdict].chip)}
+          data-testid={`hint-startsit-${player.id}`}
+        >
+          <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-current/20 flex-shrink-0">
+            {HINT_STYLE[hint.verdict].label}
+          </span>
+          <span className="text-xs leading-relaxed">{hint.reason}</span>
+        </div>
+      )}
 
       {/* Key stats */}
       <div className="flex flex-wrap gap-1.5 mb-3">
