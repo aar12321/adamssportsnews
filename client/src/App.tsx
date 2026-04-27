@@ -24,6 +24,13 @@ const AnalystApp = lazy(() => import("@/pages/apps/AnalystApp"));
 const PickEmApp = lazy(() => import("@/pages/apps/PickEmApp"));
 const Profile = lazy(() => import("@/pages/Profile"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
+// Dev-only diagnostic page. The conditional collapses to `null` in
+// production builds because Vite statically inlines `import.meta.env.DEV`
+// as `false`, so the dynamic import string never reaches Rollup and the
+// chunk is never emitted.
+const AuthDebug = import.meta.env.DEV
+  ? lazy(() => import("@/pages/AuthDebug"))
+  : null;
 
 function FullScreenLoader() {
   return (
@@ -44,6 +51,7 @@ function Router() {
           <Route path="/apps/fantasy" component={FantasyApp} />
           <Route path="/apps/analyst" component={AnalystApp} />
           <Route path="/apps/pickem" component={PickEmApp} />
+          {AuthDebug && <Route path="/auth-debug" component={AuthDebug} />}
           <Route path="/profile" component={Profile} />
           <Route component={Dashboard} />
         </Switch>
@@ -54,6 +62,21 @@ function Router() {
 
 function AuthGate() {
   const { user, loading, isNewUser } = useAuth();
+
+  // Dev-only escape hatch: /auth-debug bypasses the loading/login screens
+  // so the diagnostic can be opened even when those are stuck. Production
+  // builds tree-shake this branch (AuthDebug is null when DEV is false).
+  if (
+    AuthDebug &&
+    typeof window !== "undefined" &&
+    window.location.pathname === "/auth-debug"
+  ) {
+    return (
+      <Suspense fallback={<FullScreenLoader />}>
+        <AuthDebug />
+      </Suspense>
+    );
+  }
 
   if (loading) return <FullScreenLoader />;
   if (!user) return <Login />;
